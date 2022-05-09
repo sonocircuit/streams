@@ -2,7 +2,7 @@
 -- multi playhead
 -- sequencer
 --
--- 0.9.2 @sonocircuit
+-- 0.9.5 @sonocircuit
 --
 -- llllllll.co/t/?????
 --
@@ -11,6 +11,7 @@
 --
 
 engine.name = "Thebangs"
+-- ;install https://github.com/catfact/thebangs
 
 thebangs = include('lib/thebangs_engine')
 sc_delay = include('lib/halfsync')
@@ -63,6 +64,7 @@ options.rate_val = {"2", "1", "3/4", "2/3", "1/2", "3/8", "1/3", "1/4", "3/16", 
 options.rate_num = {2, 1, 3/4, 2/3, 1/2, 3/8, 1/3, 1/4, 3/16, 1/6, 1/8, 3/32, 1/12, 1/16, 3/64, 1/32}
 options.direction = {"fwd", "rev"}
 options.dir_mode = {"normal", "pendulum", "random"}
+options.rnd_mode = {"jump", "drunk"}
 options.gbl_out = {"per track", "thebangs", "midi", "crow ii jf"}
 options.ind_out = {"thebangs", "midi", "crow 1+2", "crow 3+4", "crow ii jf"}
 options.octave = {-3, -2, -1, 0, 1, 2, 3}
@@ -71,7 +73,7 @@ options.pages = {"SEQUENCE", "TRACK", "DELAY", "SYNTH"}
 pattern = {}
 pattern.notes = {}
 pattern.rests = {}
-for i = 1, 8 do -- 8 note and rest presets
+for i = 1, 4 do -- 4 note and rest presets
   pattern.notes[i] = {}
   pattern.rests[i] = {}
   for j = 1, 16 do
@@ -87,7 +89,8 @@ for i = 1, 4 do -- 4 tracks
   track[i].loop_end = 16
   track[i].loop_len = 16
   track[i].pos = 1
-  track[i].prob = 100
+  track[i].note_prob = 100
+  track[i].step_prob = 100
   track[i].rate = 1
   track[i].dir = 0
   track[i].dir_mode = 0
@@ -95,6 +98,32 @@ for i = 1, 4 do -- 4 tracks
   track[i].transpose = 0
   track[i].running = false
   track[i].track_out = 1
+end
+
+-- preset management
+set = {}
+for i = 1, 4 do -- 4 tracks
+  set[i] = {}
+  set[i].loop_start = {}
+  set[i].loop_end = {}
+  set[i].rate = {}
+  set[i].dir = {}
+  set[i].dir_mode = {}
+  set[i].octave = {}
+  set[i].transpose = {}
+  set[i].note_prob = {}
+  set[i].step_prob = {}
+  for j = 1, 4 do -- 4 presets
+    set[i].loop_start[j] = 1
+    set[i].loop_end[j] = 16
+    set[i].rate[j] = 8
+    set[i].dir[j] = 2
+    set[i].dir_mode[j] = 0
+    set[i].octave[j] = 4
+    set[i].transpose[j] = 8
+    set[i].note_prob[j] = 100
+    set[i].step_prob[j] = 100
+  end
 end
 
 set_midi = {}
@@ -121,6 +150,18 @@ for i = 0, 4 do
   m[i] = midi.connect()
 end
 
+held = {}
+heldmax = {}
+done = {}
+first = {}
+second = {}
+for i = 1, 4 do
+ held[i] = 0
+ heldmax[i] = 0
+ done[i] = 0
+ first[i] = 0
+ second[i] = 0
+end
 
 -------- pre init functions --------
 
@@ -164,7 +205,6 @@ function set_track_output()
   end
 end
 
-
 function set_loop_start(i, startpoint)
   track[i].loop_start = startpoint
   if track[i].loop_start >= track[i].loop_end then
@@ -179,6 +219,37 @@ function set_loop_end(i, endpoint)
     params:set("loop_start"..i, track[i].loop_end)
   end
   dirtygrid = true
+end
+
+function save_track_data(n)
+  for i = 1, 4 do
+    set[i].loop_start[n] = params:get("loop_start"..i)
+    set[i].loop_end[n] = params:get("loop_end"..i)
+    set[i].rate[n] = params:get("rate"..i)
+    set[i].dir[n] = params:get("direction"..i)
+    set[i].dir_mode[n] = params:get("step_mode"..i)
+    set[i].octave[n] = params:get("octave"..i)
+    set[i].transpose[n] = params:get("transpose"..i)
+    set[i].note_prob[n] = params:get("n_probability"..i)
+    set[i].step_prob[n] = params:get("s_probability"..i)
+  end
+  --print("saved data")
+end
+
+function load_track_data()
+  for i = 1, 4 do
+    params:set("loop_start"..i, set[i].loop_start[t_set])
+    params:set("loop_end"..i, set[i].loop_end[t_set])
+    params:set("rate"..i, set[i].rate[t_set])
+    params:set("direction"..i, set[i].dir[t_set])
+    params:set("step_mode"..i, set[i].dir_mode[t_set])
+    params:set("octave"..i, set[i].octave[t_set])
+    params:set("transpose"..i, set[i].transpose[t_set])
+    params:set("n_probability"..i, set[i].note_prob[t_set])
+    params:set("s_probability"..i, set[i].step_prob[t_set])
+  end
+  dirtygrid = true
+  --print("loaded data")
 end
 
 ------------------------ midi -------------------------
@@ -276,14 +347,13 @@ function init()
   -- track settings
   params:add_separator("tracks")
   for i = 1, 4 do
-    params:add_group("track "..i, 19)
+    params:add_group("track "..i, 21)
 
     params:add_separator("output settings")
     params:add_option("track_out"..i, "output", options.ind_out, 1)
     params:set_action("track_out"..i, function() set_track_output() build_menu() end)
 
     --midi settings
-
     params:add_option("set_midi_device"..i, "midi device", midi_devices, 1)
     params:set_action("set_midi_device"..i, function(val) m[i] = midi.connect(val) end)
     params:hide("set_midi_device"..i)
@@ -318,8 +388,11 @@ function init()
     params:hide("jf_amp"..i)
 
     params:add_separator("track parameters")
-    params:add_number("probability"..i, "probability", 0, 100, 100, function(param) return (param:get().." %") end)
-    params:set_action("probability"..i, function(x) track[i].prob = x end)
+    params:add_number("n_probability"..i, "note probability", 0, 100, 100, function(param) return (param:get().." %") end)
+    params:set_action("n_probability"..i, function(x) track[i].note_prob = x end)
+
+    params:add_number("s_probability"..i, "step probability", 0, 100, 100, function(param) return (param:get().." %") end)
+    params:set_action("s_probability"..i, function(x) track[i].step_prob = x end)
 
     params:add_option("rate"..i, "rate", options.rate_val, 8)
     params:set_action("rate"..i, function(idx) track[i].rate = options.rate_num[idx] * 4 end)
@@ -330,11 +403,13 @@ function init()
     params:add_number("transpose"..i, "transpose", -7, 7, 0, function(param) return (param:get().." deg") end)
     params:set_action("transpose"..i, function(x) track[i].transpose = x end)
 
+    params:add_option("direction"..i, "direction", options.direction, 1)
+    params:set_action("direction"..i, function(x) track[i].dir = x - 1 end)
+
     params:add_option("step_mode"..i, "step mode", options.dir_mode, 1)
     params:set_action("step_mode"..i, function(x) track[i].dir_mode = x - 1 end)
 
-    params:add_option("direction"..i, "direction", options.direction, 1)
-    params:set_action("direction"..i, function(x) track[i].dir = x - 1 end)
+    params:add_option("rnd_mode"..i, "rnd mode", options.rnd_mode, 1)
 
     params:add_number("loop_start"..i, "start position", 1, 16, 1)
     params:set_action("loop_start"..i, function(x) set_loop_start(i, x) end)
@@ -387,7 +462,7 @@ function init()
   ledcounter = metro.init(ledpulse, 0.1, -1) -- 100ms timer
   ledcounter:start()
 
-  redrawtimer = metro.init(redraw_fun, 0.02, -1) -- refresh rate at 50hz
+  redrawtimer = metro.init(redraw_update, 0.02, -1) -- refresh rate at 50hz
   redrawtimer:start()
   dirtygrid = true
   dirtyscreen = true
@@ -405,6 +480,57 @@ function init()
 
   grid.add = drawgrid_connect
 
+  -- pset callback
+  params.action_write = function(filename, name)
+    os.execute("mkdir -p "..norns.state.data.."presets/")
+    local pset_data = {}
+    pset_data.note_pset = p_set
+    pset_data.track_pset = t_set
+    for i = 1, 4 do
+      pset_data[i] = {}
+      pset_data[i].notes = {table.unpack(pattern.notes[i])}
+      pset_data[i].rests = {table.unpack(pattern.rests[i])}
+      pset_data[i].loop_start = {table.unpack(set[i].loop_start)}
+      pset_data[i].loop_end = {table.unpack(set[i].loop_end)}
+      pset_data[i].rate = {table.unpack(set[i].rate)}
+      pset_data[i].dir = {table.unpack(set[i].dir)}
+      pset_data[i].dir_mode = {table.unpack(set[i].dir_mode)}
+      pset_data[i].octave = {table.unpack(set[i].octave)}
+      pset_data[i].transpose = {table.unpack(set[i].transpose)}
+      pset_data[i].prob = {table.unpack(set[i].note_prob)}
+    end
+    tab.save(pset_data, norns.state.data.."presets/"..name.."_pset.data")
+    print("finished writing '"..filename.."' as '"..name.."'")
+  end
+
+  params.action_read = function(filename)
+    local loaded_file = io.open(filename, "r")
+    if loaded_file then
+      io.input(loaded_file)
+      local pset_id = string.sub(io.read(), 4, -1)
+      io.close(loaded_file)
+      pset_data = tab.load(norns.state.data.."presets/"..pset_id.."_pset.data")
+      p_set = pset_data.note_pset
+      t_set = pset_data.track_pset
+      for i = 1, 4 do
+        pattern.notes[i] = {table.unpack(pset_data[i].notes)}
+        pattern.rests[i] = {table.unpack(pset_data[i].rests)}
+        set[i].loop_start = {table.unpack(pset_data[i].loop_start)}
+        set[i].loop_end = {table.unpack(pset_data[i].loop_end)}
+        set[i].rate = {table.unpack(pset_data[i].rate)}
+        set[i].dir = {table.unpack(pset_data[i].dir)}
+        set[i].dir_mode = {table.unpack(pset_data[i].dir_mode)}
+        set[i].octave = {table.unpack(pset_data[i].octave)}
+        set[i].transpose = {table.unpack(pset_data[i].transpose)}
+        set[i].note_prob = {table.unpack(pset_data[i].prob)}
+      end
+      --load_track_data()
+      dirtygrid = true
+      dirtyscreen = true
+      print("finished reading '"..filename.."'")
+    end
+  end
+
 end
 
 -------- post init functions / polls --------
@@ -415,11 +541,16 @@ function step(i)
     notes_off(i)
     if track[i].running then
       -- step playhead
-      if track[i].dir_mode == 2 then
+      if track[i].dir_mode == 2 and params:get("rnd_mode"..i) == 1 then
         track[i].pos = math.random(track[i].loop_start, track[i].loop_end)
       else
         if track[i].dir == 0 then
-          track[i].pos = track[i].pos + 1
+          if math.random(100) <= track[i].step_prob then
+            track[i].pos = track[i].pos + 1
+          end
+          if params:get("rnd_mode"..i) == 2 and track[i].dir_mode == 2 then
+            params:set("direction"..i, math.random(1, 2))
+          end
           if track[i].pos > track[i].loop_end then
             if track[i].dir_mode == 1 then
               params:set("direction"..i, 2)
@@ -429,7 +560,12 @@ function step(i)
             end
           end
         elseif track[i].dir == 1 then
-          track[i].pos = track[i].pos - 1
+          if math.random(100) <= track[i].step_prob then
+            track[i].pos = track[i].pos - 1
+          end
+          if params:get("rnd_mode"..i) == 2 and track[i].dir_mode == 2 then
+            params:set("direction"..i, math.random(1, 2))
+          end
           if track[i].pos < track[i].loop_start then
             if track[i].dir_mode == 1 then
               params:set("direction"..i, 1)
@@ -446,8 +582,8 @@ function step(i)
         transport_tog = 1
       end
       -- play notes
-      -- probability
-      if math.random(100) <= track[i].prob then
+      -- note probability
+      if math.random(100) <= track[i].note_prob then
         -- play notes if not rest
         if pattern.rests[p_set][track[i].pos] < 1 then
           local note_num = scale_notes[util.clamp(pattern.notes[p_set][track[i].pos] + track[i].transpose,1, 20)] + track[i].octave * 12
@@ -541,6 +677,15 @@ function set_defaults()
   params:set("loop_end"..4, 15)
   params:set("rate"..4, 9)
   params:set("octave"..4, 2)
+  -- set presets
+  clock.run(
+    function()
+      clock.sleep(0.2)
+        for i = 1, 4 do
+          save_track_data(i)
+        end
+    end
+  )
 end
 
 -------- norns interface --------
@@ -560,7 +705,7 @@ function enc(n, d)
       if n == 2 then
         params:delta("rate"..focus, d)
       elseif n == 3 then
-        params:delta("probability"..focus, d)
+        params:delta("n_probability"..focus, d)
       end
     else
       if n == 2 then
@@ -689,12 +834,12 @@ function redraw()
     screen.move(4 + a, 24)
     screen.text(params:string("rate"..focus))
     screen.move(64 + a, 24)
-    screen.text(params:string("probability"..focus))
+    screen.text(params:string("n_probability"..focus))
     screen.level(3)
     screen.move(4 + a, 32)
     screen.text("rate")
     screen.move(64 + a, 32)
-    screen.text("prob")
+    screen.text("note prob")
     screen.level(not sel and 15 or 4)
     screen.move(4 + a, 48)
     screen.text(params:string("octave"..focus))
@@ -796,6 +941,26 @@ function g.key(x, y, z)
   if x == 16 and y == 8 then
     alt = z == 1 and true or false
   end
+  if y < 5 then
+    local i = y
+    if z == 1 and held[i] then heldmax[i] = 0 end
+    held[i] = held[i] + (z * 2 - 1)
+    if held[i] > heldmax[i] then heldmax[i] = held[i] end
+    if z == 1 then
+      if held[i] == 1 then
+        first[i] = x
+      elseif held[i] == 2 then
+        second[i] = x
+      end
+    elseif z == 0 then
+      if held[i] == 1 and heldmax[i] == 2 then
+        params:set("loop_start"..i, math.min(first[i], second[i]))
+        params:set("loop_end"..i, math.max(first[y], second[y]))
+      end
+    end
+    dirtygrid = true
+    dirtyscreen = true
+  end
   -- rest
   if z == 1 then
     if y < 5 then
@@ -825,9 +990,9 @@ function g.key(x, y, z)
       elseif set_rate then
         params:set("rate"..i, x)
       elseif set_oct then
-        if x < 9 then
+        if x > 4 and x < 9 then
           params:set("octave"..i, x - 4)
-        elseif x > 8 then
+        elseif x > 8 and x < 13 then
           params:set("octave"..i, x - 5)
         end
       elseif set_trsp then
@@ -839,16 +1004,12 @@ function g.key(x, y, z)
       end
       dirtyscreen = true
     end
-    -- track focus
     if y > 4 then
       local i = y - 4
-      if x == 1 then
-        if focus ~= i then focus = i end
-      end
-    -- run/stop
-      if x == 3 and not alt then
+      -- run/stop
+      if x == 1 and not alt then
         track[i].running = not track[i].running
-      elseif x == 3 and alt then
+      elseif x == 1 and alt then
         if track[i].running then
           if params:get("midi_trnsp") == 2 then m[0]:stop() transport_tog = 0 end
           for j = 1, 4 do
@@ -862,20 +1023,37 @@ function g.key(x, y, z)
           end
         end
       end
-    -- direction
-      if x == 5 then
-        params:set("direction"..i, x - 3)
-      elseif x == 8 then
-        params:set("direction"..i, x - 7)
+      -- track focus
+      if x == 2 then
+        if focus ~= i then focus = i end
       end
-    -- step mode
-      if x == 6 then
+      -- note presets
+      if x > 3 and x < 6 then
+        if y > 5 and y < 8 then
+          local i = (y - 5) + (x - 4) * 2
+          if alt then
+            pattern.notes[i] = {table.unpack(pattern.notes[p_set])}
+            pattern.rests[i] = {table.unpack(pattern.rests[p_set])}
+          elseif not alt then
+            p_set = i
+          end
+          dirtyscreen = true
+        end
+      end
+      -- direction
+      if x == 7 then
+        params:set("direction"..i, x - 5)
+      elseif x == 10 then
+        params:set("direction"..i, x - 9)
+      end
+      -- step mode
+      if x == 8 then
         if params:get("step_mode"..i) == 2 then
           params:set("step_mode"..i, 1)
         else
           params:set("step_mode"..i, 2)
         end
-      elseif x == 7 then
+      elseif x == 9 then
         if params:get("step_mode"..i) == 3 then
           params:set("step_mode"..i, 1)
         else
@@ -884,33 +1062,18 @@ function g.key(x, y, z)
       end
       dirtyscreen = true
     end
-    -- note preset
-    if x > 9 and x < 12 then
-      if y > 4 then
-        local n = (y - 4)
-        local i = n + (x - 10) * 4
-        if alt then
-          pattern.notes[i] = {table.unpack(pattern.notes[p_set])}
-          pattern.rests[i] = {table.unpack(pattern.rests[p_set])}
-        elseif not alt then
-          p_set = i
+    -- track preset
+    if x > 11 and x < 14 then
+      if y > 5 and y < 8 then
+        local i = (y - 5) + (x - 12) * 2
+        t_set = i
+        if alt and not mod then
+          save_track_data(t_set)
+        elseif not alt and mod then
+          load_track_data()
         end
         dirtyscreen = true
       end
-    end
-    -- track presets
-    if x == 13 then
-      local i = y - 4
-      if alt then
-        for j = 1, 4 do
-        --pattern.notes[i] = {table.unpack(pattern.notes[p_set])}
-        --pattern.rests[i] = {table.unpack(pattern.rests[p_set])}
-        end
-      elseif not alt then
-        t_set = i
-        --track_params()
-      end
-      dirtyscreen = true
     end
   elseif z == 0 then
     -- morestuff
@@ -925,48 +1088,47 @@ function gridredraw()
     for i = 1, 4 do
       track[i].len = track[i].loop_end - track[i].loop_start
       for j = 1, track[i].len + 1 do
-        g:led(track[i].loop_start + j - 1, i, set_loop and 5 or 4)
+        g:led(track[i].loop_start + j - 1, i, set_loop and 6 or 4)
       end
       if set_start then
-        g:led(track[i].loop_start, i, 6)
+        g:led(track[i].loop_start, i, 7)
       end
       if set_end then
-        g:led(track[i].loop_end, i, 6)
+        g:led(track[i].loop_end, i, 7)
       end
     end
     -- playhead
     for i = 1, 4 do
-      g:led(track[i].pos, i, 12)
+      g:led(track[i].pos, i, 15)
     end
   elseif altgrid and set_rate then
     for i = 1, 4 do
-      g:led(2, i, 2)
-      g:led(5, i, 2)
-      g:led(8, i, 2)
-      g:led(11, i, 2)
-      g:led(14, i, 2)
-      g:led(16, i, 2)
-      g:led(params:get("rate"..i), i, 8)
+      g:led(2, i, 3)
+      g:led(5, i, 3)
+      g:led(8, i, 6)
+      g:led(11, i, 3)
+      g:led(14, i, 3)
+      g:led(16, i, 3)
+      g:led(params:get("rate"..i), i, 10)
     end
   elseif altgrid and set_oct then
     for i = 1, 4 do
-      g:led(8, i, 4) -- params:get("octave"..i) == 4 and 8 or
-      g:led(9, i, 4) -- params:get("octave"..i) == 4 and 8 or
-
+      g:led(8, i, params:get("octave"..i) == 4 and 8 or 4)
+      g:led(9, i, params:get("octave"..i) == 4 and 8 or 4)
       if params:get("octave"..i) < 4 then
-        g:led(params:get("octave"..i) + 4, i, 8)
+        g:led(params:get("octave"..i) + 4, i, 10)
       elseif params:get("octave"..i) > 4 then
-        g:led(params:get("octave"..i) + 5, i, 8)
+        g:led(params:get("octave"..i) + 5, i, 10)
       end
     end
   elseif altgrid and set_trsp then
     for i = 1, 4 do
-      g:led(8, i, 4)
-      g:led(9, i, 4)
+      g:led(8, i, params:get("transpose"..i) == 0 and 8 or 4)
+      g:led(9, i, params:get("transpose"..i) == 0 and 8 or 4)
       if params:get("transpose"..i) < 0 then
-        g:led(params:get("transpose"..i) + 8, i, 8)
+        g:led(params:get("transpose"..i) + 8, i, 10)
       elseif params:get("transpose"..i) > 0 then
-        g:led(params:get("transpose"..i) + 9, i, 8)
+        g:led(params:get("transpose"..i) + 9, i, 10)
       end
     end
   end
@@ -976,32 +1138,38 @@ function gridredraw()
   g:led(15, 7, set_loop and 15 or 3)
   g:led(15, 8, mod and 15 or 8)
 
-  g:led(16, 5, set_rate and 15 or 3)
-  g:led(16, 6, set_oct and 15 or 3)
-  g:led(16, 7, set_trsp and 15 or 3)
+  g:led(16, 5, set_rate and 15 or 4)
+  g:led(16, 6, set_oct and 15 or 4)
+  g:led(16, 7, set_trsp and 15 or 4)
   g:led(16, 8, alt and 15 or 8)
   -- functions
   for i = 1, 4 do
-    g:led(1, i + 4, focus == i and 10 or 4) -- focus
-    g:led(3, i + 4, track[i].running and 10 or 4)
-    g:led(5, i + 4, track[i].dir == 1 and 10 or 4)
-    g:led(6, i + 4, track[i].dir_mode == 1 and 6 or 2)
-    g:led(7, i + 4, track[i].dir_mode == 2 and 6 or 2)
-    g:led(8, i + 4, track[i].dir == 0 and 10 or 4)
+    g:led(1, i + 4, track[i].running and 15 or 4) -- run/stop
+    g:led(2, i + 4, focus == i and 8 or 3) -- focus
+    g:led(7, i + 4, track[i].dir == 1 and 9 or 4) -- fwd
+    g:led(8, i + 4, track[i].dir_mode == 1 and 6 or 2) -- pendulum
+    g:led(9, i + 4, track[i].dir_mode == 2 and 6 or 2) -- random
+    g:led(10, i + 4, track[i].dir == 0 and 9 or 4) -- rev
   end
-  -- presets
-  for i = 1, 4 do
-    g:led(10, i + 4, 3)
-    g:led(11, i + 4, 3)
+  -- note presets
+  for i = 1, 2 do
+    g:led(4, i + 5, 3)
+    g:led(5, i + 5, 3)
   end
-  if p_set < 5 then
-    g:led(10, p_set + 4, 8)
+  if p_set < 3 then
+    g:led(4, p_set + 5, 10)
   else
-    g:led(11, p_set, 8)
+    g:led(5, p_set + 3, 10)
   end
-  -- patterns
-  for i = 1, 4 do
-    g:led(13, i + 4, 3)
+  -- track presets
+  for i = 1, 2 do
+    g:led(12, i + 5, 3)
+    g:led(13, i + 5, 3)
+  end
+  if t_set < 3 then
+    g:led(12, t_set + 5, 10)
+  else
+    g:led(13, t_set + 3, 10)
   end
   g:refresh()
 end
@@ -1065,7 +1233,7 @@ function build_menu()
   dirtyscreen = true
 end
 
-function redraw_fun()
+function redraw_update()
  if dirtygrid == true then
    gridredraw()
    dirtygrid = false
