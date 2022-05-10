@@ -2,7 +2,7 @@
 -- multi playhead
 -- sequencer
 --
--- 0.9.5 @sonocircuit
+-- 0.9.6 @sonocircuit
 --
 -- llllllll.co/t/?????
 --
@@ -20,7 +20,7 @@ mu = require "musicutil"
 
 g = grid.connect()
 
--------- set variables --------
+-------- variables --------
 
 local pageNum = 1
 local edit = 1
@@ -30,6 +30,7 @@ local focus = 1
 
 local alt = false
 local mod = false
+local shift = false
 local set_start = false
 local set_end = false
 local set_loop = false
@@ -37,9 +38,6 @@ local set_rate = false
 local set_oct = false
 local set_trsp = false
 local altgrid = false
-
-local shift = false
-local ledview = 1
 local viewinfo = 0
 
 local transport = 1 -- 1 is off, 0 is on
@@ -49,12 +47,12 @@ local v8_std_1 = 12
 local v8_std_2 = 12
 local env1_amp = 8
 local env1_a = 0
-local env1_r = 0.05
+local env1_d = 0.05
 local env2_a = 0
-local env2_r = 0.05
+local env2_d = 0.05
 local env2_amp = 8
 
--------- set tables --------
+-------- tables --------
 
 scale_names = {}
 scale_notes = {}
@@ -100,7 +98,6 @@ for i = 1, 4 do -- 4 tracks
   track[i].track_out = 1
 end
 
--- preset management
 set = {}
 for i = 1, 4 do -- 4 tracks
   set[i] = {}
@@ -163,7 +160,7 @@ for i = 1, 4 do
  second[i] = 0
 end
 
--------- pre init functions --------
+-------- track settings --------
 
 function build_scale()
   scale_notes = mu.generate_scale_of_length(params:get("root_note"), params:get("scale_mode"), 20)
@@ -221,38 +218,7 @@ function set_loop_end(i, endpoint)
   dirtygrid = true
 end
 
-function save_track_data(n)
-  for i = 1, 4 do
-    set[i].loop_start[n] = params:get("loop_start"..i)
-    set[i].loop_end[n] = params:get("loop_end"..i)
-    set[i].rate[n] = params:get("rate"..i)
-    set[i].dir[n] = params:get("direction"..i)
-    set[i].dir_mode[n] = params:get("step_mode"..i)
-    set[i].octave[n] = params:get("octave"..i)
-    set[i].transpose[n] = params:get("transpose"..i)
-    set[i].note_prob[n] = params:get("n_probability"..i)
-    set[i].step_prob[n] = params:get("s_probability"..i)
-  end
-  --print("saved data")
-end
-
-function load_track_data()
-  for i = 1, 4 do
-    params:set("loop_start"..i, set[i].loop_start[t_set])
-    params:set("loop_end"..i, set[i].loop_end[t_set])
-    params:set("rate"..i, set[i].rate[t_set])
-    params:set("direction"..i, set[i].dir[t_set])
-    params:set("step_mode"..i, set[i].dir_mode[t_set])
-    params:set("octave"..i, set[i].octave[t_set])
-    params:set("transpose"..i, set[i].transpose[t_set])
-    params:set("n_probability"..i, set[i].note_prob[t_set])
-    params:set("s_probability"..i, set[i].step_prob[t_set])
-  end
-  dirtygrid = true
-  --print("loaded data")
-end
-
------------------------- midi -------------------------
+-------- midi --------
 
 function build_midi_device_list()
   midi_devices = {}
@@ -315,6 +281,68 @@ function set_velocity(i)
   set_midi[i].vel_lo = util.clamp(set_midi[i].vel - set_midi[i].vel_range, 1, 127)
 end
 
+-------- defaults and presets --------
+
+function set_defaults()
+  -- track 1
+  params:set("loop_start"..1, 4)
+  params:set("loop_end"..1, 9)
+  params:set("rate"..2, 14)
+  -- track 2
+  params:set("loop_start"..2, 6)
+  params:set("loop_end"..2, 12)
+  params:set("rate"..2, 13)
+  params:set("octave"..2, 5)
+  params:set("transpose"..2, 7)
+  -- track 3
+  params:set("loop_start"..3, 2)
+  params:set("loop_end"..3, 9)
+  params:set("rate"..3, 6)
+  -- track 4
+  params:set("loop_start"..4, 7)
+  params:set("loop_end"..4, 15)
+  params:set("rate"..4, 9)
+  params:set("octave"..4, 2)
+  -- set presets
+  clock.run(
+    function()
+      clock.sleep(0.2)
+        for i = 1, 4 do
+          save_track_data(i)
+        end
+    end
+  )
+end
+
+function save_track_data(n)
+  for i = 1, 4 do
+    set[i].loop_start[n] = params:get("loop_start"..i)
+    set[i].loop_end[n] = params:get("loop_end"..i)
+    set[i].rate[n] = params:get("rate"..i)
+    set[i].dir[n] = params:get("direction"..i)
+    set[i].dir_mode[n] = params:get("step_mode"..i)
+    set[i].octave[n] = params:get("octave"..i)
+    set[i].transpose[n] = params:get("transpose"..i)
+    set[i].note_prob[n] = params:get("n_probability"..i)
+    set[i].step_prob[n] = params:get("s_probability"..i)
+  end
+end
+
+function load_track_data()
+  for i = 1, 4 do
+    params:set("loop_start"..i, set[i].loop_start[t_set])
+    params:set("loop_end"..i, set[i].loop_end[t_set])
+    params:set("rate"..i, set[i].rate[t_set])
+    params:set("direction"..i, set[i].dir[t_set])
+    params:set("step_mode"..i, set[i].dir_mode[t_set])
+    params:set("octave"..i, set[i].octave[t_set])
+    params:set("transpose"..i, set[i].transpose[t_set])
+    params:set("n_probability"..i, set[i].note_prob[t_set])
+    params:set("s_probability"..i, set[i].step_prob[t_set])
+  end
+  dirtygrid = true
+end
+
 -------- init function --------
 
 function init()
@@ -347,9 +375,9 @@ function init()
   -- track settings
   params:add_separator("tracks")
   for i = 1, 4 do
-    params:add_group("track "..i, 21)
+    params:add_group("track "..i, 22)
 
-    params:add_separator("output settings")
+    params:add_separator("output")
     params:add_option("track_out"..i, "output", options.ind_out, 1)
     params:set_action("track_out"..i, function() set_track_output() build_menu() end)
 
@@ -387,21 +415,12 @@ function init()
     params:set_action("jf_amp"..i, function(level) set_crow[i].jf_amp = level end)
     params:hide("jf_amp"..i)
 
-    params:add_separator("track parameters")
-    params:add_number("n_probability"..i, "note probability", 0, 100, 100, function(param) return (param:get().." %") end)
-    params:set_action("n_probability"..i, function(x) track[i].note_prob = x end)
-
+    params:add_separator("playhead")
     params:add_number("s_probability"..i, "step probability", 0, 100, 100, function(param) return (param:get().." %") end)
     params:set_action("s_probability"..i, function(x) track[i].step_prob = x end)
 
     params:add_option("rate"..i, "rate", options.rate_val, 8)
     params:set_action("rate"..i, function(idx) track[i].rate = options.rate_num[idx] * 4 end)
-
-    params:add_option("octave"..i, "octave",  options.octave, 4)
-    params:set_action("octave"..i, function(idx) track[i].octave = options.octave[idx] end)
-
-    params:add_number("transpose"..i, "transpose", -7, 7, 0, function(param) return (param:get().." deg") end)
-    params:set_action("transpose"..i, function(x) track[i].transpose = x end)
 
     params:add_option("direction"..i, "direction", options.direction, 1)
     params:set_action("direction"..i, function(x) track[i].dir = x - 1 end)
@@ -409,7 +428,17 @@ function init()
     params:add_option("step_mode"..i, "step mode", options.dir_mode, 1)
     params:set_action("step_mode"..i, function(x) track[i].dir_mode = x - 1 end)
 
-    params:add_option("rnd_mode"..i, "rnd mode", options.rnd_mode, 1)
+    params:add_option("rnd_mode"..i, "random mode", options.rnd_mode, 1)
+
+    params:add_separator("sequence")
+    params:add_number("n_probability"..i, "note probability", 0, 100, 100, function(param) return (param:get().." %") end)
+    params:set_action("n_probability"..i, function(x) track[i].note_prob = x end)
+
+    params:add_option("octave"..i, "octave",  options.octave, 4)
+    params:set_action("octave"..i, function(idx) track[i].octave = options.octave[idx] end)
+
+    params:add_number("transpose"..i, "transpose", -7, 7, 0, function(param) return (param:get().." deg") end)
+    params:set_action("transpose"..i, function(x) track[i].transpose = x end)
 
     params:add_number("loop_start"..i, "start position", 1, 16, 1)
     params:set_action("loop_start"..i, function(x) set_loop_start(i, x) end)
@@ -436,38 +465,35 @@ function init()
   params:add_option("v8_type_1", "v/oct type", {"1 v/oct", "1.2 v/oct"}, 1)
   params:set_action("v8_type_1", function(x) if x == 1 then v8_std_1 = 12 else v8_std_1 = 10 end end)
 
-  params:add_control("env1_amplitude", "amplitude", controlspec.new(0.1, 10, "lin", 0.1, 8, "v"))
+  params:add_control("env1_amplitude", "env amplitude", controlspec.new(0.1, 10, "lin", 0.1, 8, "v"))
   params:set_action("env1_amplitude", function(value) env1_amp = value end)
 
   params:add_control("env1_attack", "attack", controlspec.new(0.00, 1, "lin", 0.01, 0.00, "s"))
   params:set_action("env1_attack", function(value) env1_a = value end)
 
-  params:add_control("env1_release", "release", controlspec.new(0.01, 1, "lin", 0.01, 0.05, "s"))
-  params:set_action("env1_release", function(value) env1_r = value end)
+  params:add_control("env1_decay", "decay", controlspec.new(0.01, 1, "lin", 0.01, 0.05, "s"))
+  params:set_action("env1_decay", function(value) env1_d = value end)
 
   params:add_group("out 3+4", 4)
   params:add_option("v8_type_2", "v/oct type", {"1 v/oct", "1.2 v/oct"}, 1)
   params:set_action("v8_type_2", function(x) if x == 1 then v8_std_2 = 12 else v8_std_2 = 10 end end)
 
-  params:add_control("env2_amplitude", "amplitude", controlspec.new(0.1, 10, "lin", 0.1, 8, "v"))
+  params:add_control("env2_amplitude", "env amplitude", controlspec.new(0.1, 10, "lin", 0.1, 8, "v"))
   params:set_action("env2_amplitude", function(value) env2_amp = value end)
 
   params:add_control("env2_attack", "attack", controlspec.new(0.00, 1, "lin", 0.01, 0.00, "s"))
   params:set_action("env2_attack", function(value) env2_a = value end)
 
-  params:add_control("env2_release", "release", controlspec.new(0.01, 1, "lin", 0.01, 0.05, "s"))
-  params:set_action("env2_release", function(value) env2_r = value end)
+  params:add_control("env2_decay", "decay", controlspec.new(0.01, 1, "lin", 0.01, 0.05, "s"))
+  params:set_action("env2_decay", function(value) env2_d = value end)
+
+  params:bang()
 
   -- metros
-  ledcounter = metro.init(ledpulse, 0.1, -1) -- 100ms timer
-  ledcounter:start()
-
   redrawtimer = metro.init(redraw_update, 0.02, -1) -- refresh rate at 50hz
   redrawtimer:start()
   dirtygrid = true
   dirtyscreen = true
-
-  params:bang()
 
   -- clocks
   for i = 1, 4 do
@@ -497,7 +523,8 @@ function init()
       pset_data[i].dir_mode = {table.unpack(set[i].dir_mode)}
       pset_data[i].octave = {table.unpack(set[i].octave)}
       pset_data[i].transpose = {table.unpack(set[i].transpose)}
-      pset_data[i].prob = {table.unpack(set[i].note_prob)}
+      pset_data[i].note_prob = {table.unpack(set[i].note_prob)}
+      pset_data[i].step_prob = {table.unpack(set[i].step_prob)}
     end
     tab.save(pset_data, norns.state.data.."presets/"..name.."_pset.data")
     print("finished writing '"..filename.."' as '"..name.."'")
@@ -522,9 +549,9 @@ function init()
         set[i].dir_mode = {table.unpack(pset_data[i].dir_mode)}
         set[i].octave = {table.unpack(pset_data[i].octave)}
         set[i].transpose = {table.unpack(pset_data[i].transpose)}
-        set[i].note_prob = {table.unpack(pset_data[i].prob)}
+        set[i].note_prob = {table.unpack(pset_data[i].note_prob)}
+        set[i].step_prob = {table.unpack(pset_data[i].step_prob)}
       end
-      --load_track_data()
       dirtygrid = true
       dirtyscreen = true
       print("finished reading '"..filename.."'")
@@ -533,7 +560,7 @@ function init()
 
 end
 
--------- post init functions / polls --------
+-------- sequencer --------
 
 function step(i)
   while true do
@@ -603,12 +630,12 @@ function step(i)
           -- crow output 1+2
           elseif track[i].track_out == 3 then
             crow.output[1].volts = ((note_num - 60) / v8_std_1)
-            crow.output[2].action = "{ to(0, 0), to("..env1_amp..", "..env1_a.."), to(0, "..env1_r..", 'log') }"
+            crow.output[2].action = "{ to(0, 0), to("..env1_amp..", "..env1_a.."), to(0, "..env1_d..", 'log') }"
             crow.output[2]()
           -- crow output 3+4
           elseif track[i].track_out == 4 then
             crow.output[3].volts = ((note_num - 60) / v8_std_2)
-            crow.output[4].action = "{ to(0, 0), to("..env2_amp..", "..env2_a.."), to(0, "..env2_r..", 'log') }"
+            crow.output[4].action = "{ to(0, 0), to("..env2_amp..", "..env2_a.."), to(0, "..env2_d..", 'log') }"
             crow.output[4]()
           -- crow ii jf
           elseif track[i].track_out == 5 then
@@ -643,9 +670,17 @@ end
 function reset_pos()
   for i = 1, 4 do
     if track[i].dir == 0 then
-      track[i].pos = track[i].loop_start
+      if track[i].dir_mode == 1 then
+        track[i].pos = track[i].loop_start
+      else
+        track[i].pos = track[i].loop_end
+      end
     elseif track[i].dir == 1 then
-      track[i].pos = track[i].loop_end
+      if track[i].dir_mode == 1 then
+        track[i].pos = track[i].loop_end
+      else
+        track[i].pos = track[i].loop_start
+      end
     end
   end
 end
@@ -655,37 +690,6 @@ function randomize_notes()
     table.insert(pattern.notes[p_set], i, math.random(1, 20))
     table.insert(pattern.rests[p_set], i, 0)
   end
-end
-
-function set_defaults()
-  -- track 1
-  params:set("loop_start"..1, 4)
-  params:set("loop_end"..1, 9)
-  params:set("rate"..2, 14)
-  -- track 2
-  params:set("loop_start"..2, 6)
-  params:set("loop_end"..2, 12)
-  params:set("rate"..2, 13)
-  params:set("octave"..2, 5)
-  params:set("transpose"..2, 7)
-  -- track 3
-  params:set("loop_start"..3, 2)
-  params:set("loop_end"..3, 9)
-  params:set("rate"..3, 6)
-  -- track 4
-  params:set("loop_start"..4, 7)
-  params:set("loop_end"..4, 15)
-  params:set("rate"..4, 9)
-  params:set("octave"..4, 2)
-  -- set presets
-  clock.run(
-    function()
-      clock.sleep(0.2)
-        for i = 1, 4 do
-          save_track_data(i)
-        end
-    end
-  )
 end
 
 -------- norns interface --------
@@ -705,7 +709,11 @@ function enc(n, d)
       if n == 2 then
         params:delta("rate"..focus, d)
       elseif n == 3 then
-        params:delta("n_probability"..focus, d)
+        if shift then
+          params:delta("s_probability"..focus, d)
+        else
+          params:delta("n_probability"..focus, d)
+        end
       end
     else
       if n == 2 then
@@ -742,8 +750,6 @@ function enc(n, d)
         params:delta("bangs_release", d)
       end
     end
-  else
-    -- other page
   end
   dirtyscreen = true
   dirtygrid = true
@@ -752,6 +758,7 @@ end
 function key(n, z)
   if n == 1 then
     shift = z == 1 and true or false
+    dirtyscreen = true
   end
   if pageNum == 1 then
     if n == 2 and z == 1 then
@@ -774,8 +781,6 @@ function key(n, z)
         viewinfo = 1 - viewinfo
       end
     end
-  else
-    -- other page
   end
   dirtyscreen = true
   dirtygrid = true
@@ -834,12 +839,20 @@ function redraw()
     screen.move(4 + a, 24)
     screen.text(params:string("rate"..focus))
     screen.move(64 + a, 24)
-    screen.text(params:string("n_probability"..focus))
+    if shift then
+      screen.text(params:string("s_probability"..focus))
+    else
+      screen.text(params:string("n_probability"..focus))
+    end
     screen.level(3)
     screen.move(4 + a, 32)
     screen.text("rate")
     screen.move(64 + a, 32)
-    screen.text("note prob")
+    if shift then
+      screen.text("step prob")
+    else
+      screen.text("note prob")
+    end
     screen.level(not sel and 15 or 4)
     screen.move(4 + a, 48)
     screen.text(params:string("octave"..focus))
@@ -902,8 +915,6 @@ function redraw()
     screen.text("attack")
     screen.move(64 + a, 56)
     screen.text("release")
-  else
-    -- other page
   end
   screen.update()
 end
@@ -941,6 +952,7 @@ function g.key(x, y, z)
   if x == 16 and y == 8 then
     alt = z == 1 and true or false
   end
+  -- set loop size
   if y < 5 then
     local i = y
     if z == 1 and held[i] then heldmax[i] = 0 end
@@ -961,7 +973,7 @@ function g.key(x, y, z)
     dirtygrid = true
     dirtyscreen = true
   end
-  -- rest
+  -- all other functions
   if z == 1 then
     if y < 5 then
       local i = y
@@ -1066,7 +1078,15 @@ function g.key(x, y, z)
     if x > 11 and x < 14 then
       if y > 5 and y < 8 then
         local i = (y - 5) + (x - 12) * 2
-        t_set = i
+        if alt or mod then
+          t_set = i
+        end
+        dirtyscreen = true
+      end
+    end
+  elseif z == 0 then
+    if x > 11 and x < 14 then
+      if y > 5 and y < 8 then
         if alt and not mod then
           save_track_data(t_set)
         elseif not alt and mod then
@@ -1075,8 +1095,6 @@ function g.key(x, y, z)
         dirtyscreen = true
       end
     end
-  elseif z == 0 then
-    -- morestuff
   end
   dirtygrid = true
 end
@@ -1242,10 +1260,6 @@ function redraw_update()
    redraw()
    dirtyscreen = false
  end
-end
-
-function ledpulse()
- ledview = (ledview % 8) + 4 -- define range (1-15)
 end
 
 function drawgrid_connect()
