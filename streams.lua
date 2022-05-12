@@ -1,12 +1,23 @@
--- ~~~ streams ~~~
--- multi playhead
--- sequencer
+-- ~~~~~~~~~ streams ~~~~~~~~
 --
--- 0.9.6 @sonocircuit
+-- ~~a multi playhead sequencer
 --
+-- 1.0.0 @sonocircuit
 -- llllllll.co/t/?????
 --
--- for docs goto:
+--
+-- for docs go to:
+-- >> github.com
+--    /sonocircuits/streams
+--
+-- or smb into:
+-- >> code/streams/docs
+--
+--
+--        ~~~~~~~~~~~~
+--          ~~~~~
+--             ~~~~~~~~~
+--                ~~~
 --
 --
 
@@ -26,6 +37,7 @@ local pageNum = 1
 local edit = 1
 local p_set = 1
 local t_set = 1
+local tp_set = 1
 local focus = 1
 
 local alt = false
@@ -229,11 +241,11 @@ function build_midi_device_list()
   end
 end
 
-function midi.add() -- this gets called when a MIDI device is registered
+function midi.add() -- MIDI register callback
   build_midi_device_list()
 end
 
-function midi.remove() -- this gets called when a MIDI device is removed
+function midi.remove() -- MIDI remove callback
   clock.run(
     function()
       clock.sleep(0.2)
@@ -285,25 +297,26 @@ end
 
 function set_defaults()
   -- track 1
-  params:set("loop_start"..1, 4)
-  params:set("loop_end"..1, 9)
+  params:set("loop_start"..1, 3)
+  params:set("loop_end"..1, 13)
   params:set("rate"..2, 14)
   -- track 2
-  params:set("loop_start"..2, 6)
-  params:set("loop_end"..2, 12)
+  params:set("loop_start"..2, 4)
+  params:set("loop_end"..2, 9)
   params:set("rate"..2, 13)
   params:set("octave"..2, 5)
-  params:set("transpose"..2, 7)
+  params:set("transpose"..2, 2)
   -- track 3
-  params:set("loop_start"..3, 2)
-  params:set("loop_end"..3, 9)
+  params:set("loop_start"..3, 7)
+  params:set("loop_end"..3, 14)
   params:set("rate"..3, 6)
+  params:set("transpose"..3, 4)
   -- track 4
-  params:set("loop_start"..4, 7)
-  params:set("loop_end"..4, 15)
-  params:set("rate"..4, 9)
-  params:set("octave"..4, 2)
-  -- set presets
+  params:set("loop_start"..4, 9)
+  params:set("loop_end"..4, 11)
+  params:set("rate"..4, 3)
+  params:set("octave"..4, 3)
+  -- presets
   clock.run(
     function()
       clock.sleep(0.2)
@@ -314,6 +327,7 @@ function set_defaults()
   )
 end
 
+-- save preset
 function save_track_data(n)
   for i = 1, 4 do
     set[i].loop_start[n] = params:get("loop_start"..i)
@@ -328,6 +342,7 @@ function save_track_data(n)
   end
 end
 
+-- load preset
 function load_track_data()
   for i = 1, 4 do
     params:set("loop_start"..i, set[i].loop_start[t_set])
@@ -352,7 +367,7 @@ function init()
     table.insert(scale_names, string.lower(mu.SCALES[i].name))
   end
 
-  -- scale settings
+  -- scale params
   params:add_separator("global settings")
 
   params:add_option("global_out", "output", options.gbl_out, 1)
@@ -364,7 +379,7 @@ function init()
   params:add_number("root_note", "root note", 24, 84, 48, function(param) return mu.note_num_to_name(param:get(), true) end)
   params:set_action("root_note", function() build_scale() end)
 
-  -- midi settings
+  -- midi params
   build_midi_device_list()
 
   params:add_option("set_midi_device", "midi device", midi_devices, 1)
@@ -372,7 +387,7 @@ function init()
 
   params:add_option("midi_trnsp", "midi transport", {"off", "send", "receive"}, 1)
 
-  -- track settings
+  -- track params
   params:add_separator("tracks")
   for i = 1, 4 do
     params:add_group("track "..i, 22)
@@ -381,7 +396,7 @@ function init()
     params:add_option("track_out"..i, "output", options.ind_out, 1)
     params:set_action("track_out"..i, function() set_track_output() build_menu() end)
 
-    --midi settings
+    -- midi params
     params:add_option("set_midi_device"..i, "midi device", midi_devices, 1)
     params:set_action("set_midi_device"..i, function(val) m[i] = midi.connect(val) end)
     params:hide("set_midi_device"..i)
@@ -402,7 +417,7 @@ function init()
     params:set_action("midi_vel_range"..i, function(val) set_midi[i].vel_range = val set_velocity(i) end)
     params:hide("midi_vel_range"..i)
 
-    -- jf settings
+    -- jf params
     params:add_option("jf_mode"..i, "jf_mode", {"vox", "note"}, 1)
     params:set_action("jf_mode"..i, function() build_menu() end)
     params:hide("jf_mode"..i)
@@ -415,6 +430,7 @@ function init()
     params:set_action("jf_amp"..i, function(level) set_crow[i].jf_amp = level end)
     params:hide("jf_amp"..i)
 
+    -- playhead params
     params:add_separator("playhead")
     params:add_number("s_probability"..i, "step probability", 0, 100, 100, function(param) return (param:get().." %") end)
     params:set_action("s_probability"..i, function(x) track[i].step_prob = x end)
@@ -430,6 +446,7 @@ function init()
 
     params:add_option("rnd_mode"..i, "random mode", options.rnd_mode, 1)
 
+    -- sequence params
     params:add_separator("sequence")
     params:add_number("n_probability"..i, "note probability", 0, 100, 100, function(param) return (param:get().." %") end)
     params:set_action("n_probability"..i, function(x) track[i].note_prob = x end)
@@ -512,6 +529,7 @@ function init()
     local pset_data = {}
     pset_data.note_pset = p_set
     pset_data.track_pset = t_set
+    pset_data.prevtrack_pset = tp_set
     for i = 1, 4 do
       pset_data[i] = {}
       pset_data[i].notes = {table.unpack(pattern.notes[i])}
@@ -539,6 +557,7 @@ function init()
       pset_data = tab.load(norns.state.data.."presets/"..pset_id.."_pset.data")
       p_set = pset_data.note_pset
       t_set = pset_data.track_pset
+      tp_set = pset_data.prevtrack_pset
       for i = 1, 4 do
         pattern.notes[i] = {table.unpack(pset_data[i].notes)}
         pattern.rests[i] = {table.unpack(pset_data[i].rests)}
@@ -602,6 +621,8 @@ function step(i)
             end
           end
         end
+        dirtygrid = true
+        dirtyscreen = true
       end
       -- send midi start msg
       if params:get("midi_trnsp") == 2 and transport_tog == 0 then
@@ -648,8 +669,6 @@ function step(i)
         end
       end
     end
-    dirtygrid = true
-    dirtyscreen = true
   end
 end
 
@@ -758,7 +777,6 @@ end
 function key(n, z)
   if n == 1 then
     shift = z == 1 and true or false
-    dirtyscreen = true
   end
   if pageNum == 1 then
     if n == 2 and z == 1 then
@@ -805,10 +823,9 @@ function redraw()
   screen.text(options.pages[pageNum])
   local sel = viewinfo == 0
   if pageNum == 1 then
-    -- draw notes
     for i = 1, 16 do
-      screen.move(i * 8 - 8 + 1, 44 - ((pattern.notes[p_set][i]) * 2) + 8) -- lowest note at y = 22 + clearance (10). tweek val
-      -- note visibility
+      -- draw notes
+      screen.move(i * 8 - 8 + 1, 44 - ((pattern.notes[p_set][i]) * 2) + 8)
       if pattern.rests[p_set][i] == 1 then
         screen.level(0)
       else
@@ -818,7 +835,7 @@ function redraw()
       screen.line_rel(4, 0)
       screen.stroke()
     end
-    -- draw playhead indicators below notes
+    -- draw playheads
     for i = 1, 4 do
       screen.level(1)
       screen.move(track[i].loop_start * 8 - 8 + 1, 51 + i * 3)
@@ -830,90 +847,79 @@ function redraw()
       screen.stroke()
     end
   elseif pageNum == 2 then
-    local a = 10
     screen.level(6)
     screen.move(28, 8)
     screen.font_size(8)
     screen.text(focus)
     screen.level(sel and 15 or 4)
-    screen.move(4 + a, 24)
+    screen.move(14, 24)
     screen.text(params:string("rate"..focus))
-    screen.move(64 + a, 24)
+    screen.move(74, 24)
     if shift then
       screen.text(params:string("s_probability"..focus))
     else
       screen.text(params:string("n_probability"..focus))
     end
     screen.level(3)
-    screen.move(4 + a, 32)
+    screen.move(14, 32)
     screen.text("rate")
-    screen.move(64 + a, 32)
+    screen.move(74, 32)
     if shift then
       screen.text("step prob")
     else
       screen.text("note prob")
     end
     screen.level(not sel and 15 or 4)
-    screen.move(4 + a, 48)
+    screen.move(14, 48)
     screen.text(params:string("octave"..focus))
-    screen.move(64 + a, 48)
+    screen.move(74, 48)
     screen.text(params:string("transpose"..focus))
     screen.level(3)
-    screen.move(4 + a, 56)
+    screen.move(14, 56)
     screen.text("octave")
-    screen.move(64 + a, 56)
+    screen.move(74, 56)
     screen.text("transpose")
   elseif pageNum == 3 then
-    local a = 10
-    --screen.font_size(16)
     screen.level(sel and 15 or 4)
-    screen.move(4 + a, 24)
+    screen.move(14, 24)
     screen.text(params:string("delay_level"))
-    screen.move(64 + a, 24)
+    screen.move(74, 24)
     screen.text(params:string("delay_length"))
     screen.level(3)
-    screen.move(4 + a, 32)
-    --screen.font_size(12)
+    screen.move(14, 32)
     screen.text("level")
-    screen.move(64 + a, 32)
+    screen.move(74, 32)
     screen.text("rate")
     screen.level(not sel and 15 or 4)
-    screen.move(4 + a, 48)
-    --screen.font_size(16)
+    screen.move(14, 48)
     screen.text(params:string("delay_feedback"))
-    screen.move(64 + a, 48)
+    screen.move(74, 48)
     screen.text(params:string("delay_length_ft"))
     screen.level(3)
-    screen.move(4 + a, 56)
-    --screen.font_size(12)
+    screen.move(14, 56)
     screen.text("feedback")
-    screen.move(64 + a, 56)
+    screen.move(74, 56)
     screen.text("adjust rate")
   elseif pageNum == 4 then
-    local a = 10
-    --screen.font_size(16)
     screen.level(sel and 15 or 4)
-    screen.move(4 + a, 24)
+    screen.move(14, 24)
     screen.text(params:string("bangs_cutoff"))
-    screen.move(64 + a, 24)
+    screen.move(74, 24)
     screen.text(params:string("bangs_pw"))
     screen.level(3)
-    screen.move(4 + a, 32)
-    --screen.font_size(12)
+    screen.move(14, 32)
     screen.text("cutoff")
-    screen.move(64 + a, 32)
+    screen.move(74, 32)
     screen.text("pw")
     screen.level(not sel and 15 or 4)
-    screen.move(4 + a, 48)
-    --screen.font_size(16)
+    screen.move(14, 48)
     screen.text(params:string("bangs_attack"))
-    screen.move(64 + a, 48)
+    screen.move(74, 48)
     screen.text(params:string("bangs_release"))
     screen.level(3)
-    screen.move(4 + a, 56)
-    --screen.font_size(12)
+    screen.move(14, 56)
     screen.text("attack")
-    screen.move(64 + a, 56)
+    screen.move(74, 56)
     screen.text("release")
   end
   screen.update()
@@ -1078,23 +1084,25 @@ function g.key(x, y, z)
     if x > 11 and x < 14 then
       if y > 5 and y < 8 then
         local i = (y - 5) + (x - 12) * 2
-        if alt or mod then
+        if alt then
+          save_track_data(t_set)
+        elseif not alt then
+          save_track_data(tp_set)
           t_set = i
         end
-        dirtyscreen = true
-      end
+			end
+      dirtyscreen = true
     end
   elseif z == 0 then
     if x > 11 and x < 14 then
       if y > 5 and y < 8 then
-        if alt and not mod then
-          save_track_data(t_set)
-        elseif not alt and mod then
-          load_track_data()
-        end
+        local i = (y - 5) + (x - 12) * 2
+        tp_set = i
+        load_track_data()
         dirtyscreen = true
       end
     end
+    dirtyscreen = true
   end
   dirtygrid = true
 end
