@@ -185,7 +185,7 @@ end
 function set_track_output()
   local glb_out = params:get("global_out")
   for i = 1, 4 do
-    if params:get("global_out") == 1 then
+    if glb_out == 1 then
       track[i].track_out = params:get("track_out"..i)
     elseif glb_out == 2 then
       track[i].track_out = 1
@@ -193,6 +193,7 @@ function set_track_output()
       track[i].track_out = 2
     elseif glb_out == 4 then
       track[i].track_out = 5
+      params:set("jf_mode"..i, 2)
     end
   end
   if glb_out == 4 then
@@ -257,7 +258,9 @@ end
 function clock.transport.start()
   if params:get("midi_trnsp") == 3 then
     for i = 1, 4 do
-      track[i].running = true
+      if params:get("midi_trnsp_enable"..i) == 2 then
+        track[i].running = true
+      end
     end
   end
 end
@@ -270,6 +273,7 @@ function clock.transport.stop()
       notes_off(i)
     end
   end
+  dirtygrid = true
 end
 
 function notes_off(i)
@@ -390,7 +394,7 @@ function init()
   -- track params
   params:add_separator("tracks")
   for i = 1, 4 do
-    params:add_group("track "..i, 22)
+    params:add_group("track "..i, 23)
 
     params:add_separator("output")
     params:add_option("track_out"..i, "output", options.ind_out, 1)
@@ -462,6 +466,8 @@ function init()
 
     params:add_number("loop_end"..i, "end position", 1, 16, 16)
     params:set_action("loop_end"..i, function(x) set_loop_end(i, x) end)
+
+    params:add_option("midi_trnsp_enable"..i, "midi start/stop msg", {"ignore", "follow"}, 2)
 
   end
 
@@ -1040,6 +1046,7 @@ function g.key(x, y, z)
             track[j].running = true
           end
         end
+        dirtyscreen = true
       end
       -- track focus
       if x == 2 then
