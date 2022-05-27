@@ -13,20 +13,19 @@ function Thebangs.synth_params()
   params:set_action("bangs_amp", function(x) engine.amp(x) end)
 
   params:add_control("bangs_cutoff", "cutoff", controlspec.new(50, 8000, "exp", 0, 900, "hz"))
-  params:set_action("bangs_cutoff", function(x) engine.cutoff(x) end)
+  params:set_action("bangs_cutoff", function(x) engine.cutoff(x) s_refresh() end)
 
-  params:add_control("bangs_pw", "pw", controlspec.new(0, 100, "lin", 0, 32, "%"))
-  params:set_action("bangs_pw", function(x) engine.pw(x / 100) end)
+  params:add_control("bangs_pw", "pw/mod1", controlspec.new(0, 100, "lin", 0, 32, "%"))
+  params:set_action("bangs_pw", function(x) engine.pw(x / 100) s_refresh() end)
+
+  params:add_control("bangs_gain", "gain/mod2", controlspec.new(0, 4, "lin", 0, 1, ""))
+  params:set_action("bangs_gain", function(x) engine.gain(x) end)
 
   params:add_control("bangs_attack", "attack", controlspec.new(0.0001, 1, "exp", 0, 0.01, "s"))
-  params:set_action("bangs_attack", function(x) engine.attack(x) end)
+  params:set_action("bangs_attack", function(x) engine.attack(x) s_refresh() end)
 
   params:add_control("bangs_release", "release", controlspec.new(0.1, 3.2, "lin", 0, 0.8, "s"))
-  params:set_action("bangs_release", function(x) engine.release(x) end)
-
-  params:add_control("bangs_gain", "gain", controlspec.new(0, 4, "lin", 0, 1, ""))
-  params:set_action("bangs_gain", function(x) engine.gain(x) end)
-  params:hide("bangs_gain")
+  params:set_action("bangs_release", function(x) engine.release(x) s_refresh() end)
 
   params:add_control("bangs_pan", "pan", controlspec.new(-1, 1, "lin", 0, 0, ""))
   params:set_action("bangs_pan", function(x) engine.pan(x) end)
