@@ -2,7 +2,7 @@
 --
 -- ~~a multi playhead sequencer
 --
--- 1.0.0 @sonocircuit
+-- 1.0.4 @sonocircuit
 -- llllllll.co/t/?????
 --
 --
@@ -25,7 +25,7 @@ engine.name = "Thebangs"
 -- ;install https://github.com/catfact/thebangs
 
 thebangs = include('lib/thebangs_engine')
-sc_delay = include('lib/halfsync')
+halfsync = include('lib/halfsync')
 
 mu = require "musicutil"
 
@@ -79,6 +79,7 @@ options.gbl_out = {"per track", "thebangs", "midi", "crow ii jf"}
 options.ind_out = {"thebangs", "midi", "crow 1+2", "crow 3+4", "crow ii jf"}
 options.octave = {-3, -2, -1, 0, 1, 2, 3}
 options.pages = {"SEQUENCE", "TRACK", "DELAY", "SYNTH"}
+options.tracks = {"off", "track 1", "track 2", "track 3", "track 4"}
 
 pattern = {}
 pattern.notes = {}
@@ -107,6 +108,7 @@ for i = 1, 4 do -- 4 tracks
   track[i].octave = 0
   track[i].transpose = 0
   track[i].running = false
+  track[i].reset = false
   track[i].track_out = 1
 end
 
@@ -165,11 +167,11 @@ done = {}
 first = {}
 second = {}
 for i = 1, 4 do
- held[i] = 0
- heldmax[i] = 0
- done[i] = 0
- first[i] = 0
- second[i] = 0
+  held[i] = 0
+  heldmax[i] = 0
+  done[i] = 0
+  first[i] = 0
+  second[i] = 0
 end
 
 -------- track settings --------
@@ -191,6 +193,8 @@ function set_track_output()
       track[i].track_out = 1
     elseif glb_out == 3 then
       track[i].track_out = 2
+      params:set("track_midi_device"..i, params:get("global_midi_device"))
+      params:set("track_midi_channel"..i, params:get("global_midi_channel"))
     elseif glb_out == 4 then
       track[i].track_out = 5
       params:set("jf_mode"..i, 2)
@@ -220,7 +224,7 @@ function set_loop_start(i, startpoint)
   if track[i].loop_start >= track[i].loop_end then
     params:set("loop_end"..i, track[i].loop_start)
   end
-  dirtygrid = true
+  p_refresh()
 end
 
 function set_loop_end(i, endpoint)
@@ -228,7 +232,7 @@ function set_loop_end(i, endpoint)
   if track[i].loop_end <= track[i].loop_start then
     params:set("loop_start"..i, track[i].loop_end)
   end
-  dirtygrid = true
+  p_refresh()
 end
 
 -------- midi --------
@@ -250,7 +254,7 @@ function midi.remove() -- MIDI remove callback
   clock.run(
     function()
       clock.sleep(0.2)
-        build_midi_device_list()
+      build_midi_device_list()
     end
   )
 end
@@ -273,6 +277,7 @@ function clock.transport.stop()
       notes_off(i)
     end
   end
+  dirtyscreen = true
   dirtygrid = true
 end
 
@@ -320,15 +325,17 @@ function set_defaults()
   params:set("loop_end"..4, 11)
   params:set("rate"..4, 3)
   params:set("octave"..4, 3)
+  for i = 1, 4 do
+    track[i].pos = track[i].loop_start
+  end
   -- presets
   clock.run(
-    function()
-      clock.sleep(0.2)
-        for i = 1, 4 do
-          save_track_data(i)
-        end
+  function()
+    clock.sleep(0.2)
+    for i = 1, 4 do
+      save_track_data(i)
     end
-  )
+  end)
 end
 
 -- save preset
@@ -360,6 +367,7 @@ function load_track_data()
     params:set("s_probability"..i, set[i].step_prob[t_set])
   end
   dirtygrid = true
+  dirtyscreen = true
 end
 
 -------- init function --------
@@ -386,28 +394,32 @@ function init()
   -- midi params
   build_midi_device_list()
 
-  params:add_option("set_midi_device", "midi device", midi_devices, 1)
-  params:set_action("set_midi_device", function(val) m[0] = midi.connect(val) end)
+  params:add_option("global_midi_device", "midi device", midi_devices, 1)
+  params:set_action("global_midi_device", function(val) m[0] = midi.connect(val) set_track_output() end)
+
+  params:add_number("global_midi_channel", "global midi channel", 1, 16, 1)
+  params:set_action("global_midi_channel", function(val) all_notes_off() set_track_output() end)
+  params:hide("global_midi_channel")
 
   params:add_option("midi_trnsp", "midi transport", {"off", "send", "receive"}, 1)
 
   -- track params
   params:add_separator("tracks")
   for i = 1, 4 do
-    params:add_group("track "..i, 23)
+    params:add_group("track "..i, 24)
 
     params:add_separator("output")
     params:add_option("track_out"..i, "output", options.ind_out, 1)
     params:set_action("track_out"..i, function() set_track_output() build_menu() end)
 
     -- midi params
-    params:add_option("set_midi_device"..i, "midi device", midi_devices, 1)
-    params:set_action("set_midi_device"..i, function(val) m[i] = midi.connect(val) end)
-    params:hide("set_midi_device"..i)
+    params:add_option("track_midi_device"..i, "midi device", midi_devices, 1)
+    params:set_action("track_midi_device"..i, function(val) m[i] = midi.connect(val) end)
+    params:hide("track_midi_device"..i)
 
-    params:add_number("midi_out_channel"..i, "midi channel", 1, 16, 1)
-    params:set_action("midi_out_channel"..i, function(val) notes_off(i) set_midi[i].ch = val end)
-    params:hide("midi_out_channel"..i)
+    params:add_number("track_midi_channel"..i, "midi channel", 1, 16, 1)
+    params:set_action("track_midi_channel"..i, function(val) notes_off(i) set_midi[i].ch = val end)
+    params:hide("track_midi_channel"..i)
 
     params:add_option("vel_mode"..i, "velocity mode", {"fixed", "random"}, 1)
     params:set_action("vel_mode"..i, function() set_velocity(i) end)
@@ -437,29 +449,29 @@ function init()
     -- playhead params
     params:add_separator("playhead")
     params:add_number("s_probability"..i, "step probability", 0, 100, 100, function(param) return (param:get().." %") end)
-    params:set_action("s_probability"..i, function(x) track[i].step_prob = x end)
+    params:set_action("s_probability"..i, function(x) track[i].step_prob = x p_refresh() end)
 
     params:add_option("rate"..i, "rate", options.rate_val, 8)
-    params:set_action("rate"..i, function(idx) track[i].rate = options.rate_num[idx] * 4 end)
+    params:set_action("rate"..i, function(idx) track[i].rate = options.rate_num[idx] * 4 p_refresh() end)
 
     params:add_option("direction"..i, "direction", options.direction, 1)
-    params:set_action("direction"..i, function(x) track[i].dir = x - 1 end)
+    params:set_action("direction"..i, function(x) track[i].dir = x - 1 p_refresh() end)
 
     params:add_option("step_mode"..i, "step mode", options.dir_mode, 1)
-    params:set_action("step_mode"..i, function(x) track[i].dir_mode = x - 1 end)
+    params:set_action("step_mode"..i, function(x) track[i].dir_mode = x - 1 p_refresh() end)
 
     params:add_option("rnd_mode"..i, "random mode", options.rnd_mode, 1)
 
     -- sequence params
     params:add_separator("sequence")
     params:add_number("n_probability"..i, "note probability", 0, 100, 100, function(param) return (param:get().." %") end)
-    params:set_action("n_probability"..i, function(x) track[i].note_prob = x end)
+    params:set_action("n_probability"..i, function(x) track[i].note_prob = x p_refresh() end)
 
     params:add_option("octave"..i, "octave",  options.octave, 4)
-    params:set_action("octave"..i, function(idx) track[i].octave = options.octave[idx] end)
+    params:set_action("octave"..i, function(idx) track[i].octave = options.octave[idx] p_refresh() end)
 
     params:add_number("transpose"..i, "transpose", -7, 7, 0, function(param) return (param:get().." deg") end)
-    params:set_action("transpose"..i, function(x) track[i].transpose = x end)
+    params:set_action("transpose"..i, function(x) track[i].transpose = x p_refresh() end)
 
     params:add_number("loop_start"..i, "start position", 1, 16, 1)
     params:set_action("loop_start"..i, function(x) set_loop_start(i, x) end)
@@ -467,15 +479,18 @@ function init()
     params:add_number("loop_end"..i, "end position", 1, 16, 16)
     params:set_action("loop_end"..i, function(x) set_loop_end(i, x) end)
 
-    params:add_option("midi_trnsp_enable"..i, "midi start/stop msg", {"ignore", "follow"}, 2)
+    params:add_option("track_reset"..i, "position reset", options.tracks, 1)
+    params:hide("track_reset"..i)
+
+    params:add_option("midi_trnsp_enable"..i, "midi start msg", {"ignore", "follow"}, 2)
 
   end
 
   params:add_separator("sound")
 
   -- delay params
-  params:add_group("delay", 4)
-  sc_delay.init()
+  params:add_group("delay", 8)
+  halfsync.init()
 
   -- engine params
   params:add_group("thebangs", 8)
@@ -512,8 +527,12 @@ function init()
 
   params:bang()
 
+  set_defaults()
+  transport_all()
+  reset_pos()
+
   -- metros
-  redrawtimer = metro.init(redraw_update, 0.02, -1) -- refresh rate at 50hz
+  redrawtimer = metro.init(redraw_update, 1/30, -1) -- refresh rate at 50hz
   redrawtimer:start()
   dirtygrid = true
   dirtyscreen = true
@@ -523,15 +542,16 @@ function init()
     clock.run(step, i)
   end
 
-  set_defaults()
-  transport_all()
-  reset_pos()
-
   grid.add = drawgrid_connect
 
   -- pset callback
   params.action_write = function(filename, name)
-    os.execute("mkdir -p "..norns.state.data.."presets/")
+
+    local pset_string = string.sub(filename, string.len(filename) - 6, -1)
+    local number = pset_string:gsub(".pset", "")
+
+    os.execute("mkdir -p "..norns.state.data.."presets/"..number.."/")
+
     local pset_data = {}
     pset_data.note_pset = p_set
     pset_data.track_pset = t_set
@@ -550,7 +570,7 @@ function init()
       pset_data[i].note_prob = {table.unpack(set[i].note_prob)}
       pset_data[i].step_prob = {table.unpack(set[i].step_prob)}
     end
-    tab.save(pset_data, norns.state.data.."presets/"..name.."_pset.data")
+    tab.save(pset_data, norns.state.data.."presets/"..number.."/"..name.."_pset.data")
     print("finished writing '"..filename.."' as '"..name.."'")
   end
 
@@ -560,7 +580,9 @@ function init()
       io.input(loaded_file)
       local pset_id = string.sub(io.read(), 4, -1)
       io.close(loaded_file)
-      pset_data = tab.load(norns.state.data.."presets/"..pset_id.."_pset.data")
+      local pset_string = string.sub(filename, string.len(filename) - 6, -1)
+      local number = pset_string:gsub(".pset", "")
+      pset_data = tab.load(norns.state.data.."presets/"..number.."/"..pset_id.."_pset.data")
       p_set = pset_data.note_pset
       t_set = pset_data.track_pset
       tp_set = pset_data.prevtrack_pset
@@ -577,6 +599,7 @@ function init()
         set[i].note_prob = {table.unpack(pset_data[i].note_prob)}
         set[i].step_prob = {table.unpack(pset_data[i].step_prob)}
       end
+      load_track_data()
       dirtygrid = true
       dirtyscreen = true
       print("finished reading '"..filename.."'")
@@ -595,6 +618,7 @@ function step(i)
       -- step playhead
       if track[i].dir_mode == 2 and params:get("rnd_mode"..i) == 1 then
         track[i].pos = math.random(track[i].loop_start, track[i].loop_end)
+        t_refresh()
       else
         if track[i].dir == 0 then
           if math.random(100) <= track[i].step_prob then
@@ -603,12 +627,18 @@ function step(i)
           if params:get("rnd_mode"..i) == 2 and track[i].dir_mode == 2 then
             params:set("direction"..i, math.random(1, 2))
           end
-          if track[i].pos > track[i].loop_end then
+          if (track[i].pos > track[i].loop_end or track[i].reset) then
             if track[i].dir_mode == 1 then
               params:set("direction"..i, 2)
               track[i].pos = track[i].loop_end - 1
             else
               track[i].pos = track[i].loop_start
+            end
+            track[i].reset = false
+            for j = 1, 4 do
+              if params:get("track_reset"..j) - 1  == i then
+                track[j].reset = true
+              end
             end
           end
         elseif track[i].dir == 1 then
@@ -618,17 +648,22 @@ function step(i)
           if params:get("rnd_mode"..i) == 2 and track[i].dir_mode == 2 then
             params:set("direction"..i, math.random(1, 2))
           end
-          if track[i].pos < track[i].loop_start then
+          if (track[i].pos < track[i].loop_start or track[i].reset) then
             if track[i].dir_mode == 1 then
               params:set("direction"..i, 1)
               track[i].pos = track[i].loop_start + 1
             else
               track[i].pos = track[i].loop_end
             end
+            track[i].reset = false
+            for j = 1, 4 do
+              if params:get("track_reset"..j) - 1 == i then
+                track[j].reset = true
+              end
+            end
           end
         end
-        dirtygrid = true
-        dirtyscreen = true
+        t_refresh()
       end
       -- send midi start msg
       if params:get("midi_trnsp") == 2 and transport_tog == 0 then
@@ -694,19 +729,7 @@ end
 
 function reset_pos()
   for i = 1, 4 do
-    if track[i].dir == 0 then
-      if track[i].dir_mode == 1 then
-        track[i].pos = track[i].loop_start
-      else
-        track[i].pos = track[i].loop_end
-      end
-    elseif track[i].dir == 1 then
-      if track[i].dir_mode == 1 then
-        track[i].pos = track[i].loop_end
-      else
-        track[i].pos = track[i].loop_start
-      end
-    end
+    track[i].reset = true
   end
 end
 
@@ -722,6 +745,7 @@ end
 function enc(n, d)
   if n == 1 then
     pageNum = util.clamp(pageNum + d, 1, #options.pages)
+    dirtyscreen = true
   end
   if pageNum == 1 then
     if n == 2 then
@@ -729,6 +753,7 @@ function enc(n, d)
     elseif n == 3 then
       pattern.notes[p_set][edit] = util.clamp(pattern.notes[p_set][edit] + d, 1, 20)
     end
+    dirtyscreen = true
   elseif pageNum == 2 then
     if viewinfo == 0 then
       if n == 2 then
@@ -776,8 +801,6 @@ function enc(n, d)
       end
     end
   end
-  dirtyscreen = true
-  dirtygrid = true
 end
 
 function key(n, z)
@@ -832,10 +855,9 @@ function redraw()
     for i = 1, 16 do
       -- draw notes
       screen.move(i * 8 - 8 + 1, 44 - ((pattern.notes[p_set][i]) * 2) + 8)
+      screen.level((i == edit) and 15 or 3)
       if pattern.rests[p_set][i] == 1 then
-        screen.level(0)
-      else
-        screen.level((i == edit) and 15 or 3)
+        screen.level((i == edit) and 1 or 0)
       end
       screen.line_width(2)
       screen.line_rel(4, 0)
@@ -898,7 +920,11 @@ function redraw()
     screen.text("rate")
     screen.level(not sel and 15 or 4)
     screen.move(14, 48)
-    screen.text(params:string("delay_feedback"))
+    if params:get("delay_feedback") < 1 then
+      screen.text(params:string("delay_feedback"))
+    else
+      screen.text("freeeeze")
+    end
     screen.move(74, 48)
     screen.text(params:string("delay_length_ft"))
     screen.level(3)
@@ -982,8 +1008,7 @@ function g.key(x, y, z)
         params:set("loop_end"..i, math.max(first[y], second[y]))
       end
     end
-    dirtygrid = true
-    dirtyscreen = true
+    t_refresh()
   end
   -- all other functions
   if z == 1 then
@@ -1033,6 +1058,7 @@ function g.key(x, y, z)
       -- run/stop
       if x == 1 and not alt then
         track[i].running = not track[i].running
+        if not track[i].running then notes_off(i) end
       elseif x == 1 and alt then
         if track[i].running then
           if params:get("midi_trnsp") == 2 then m[0]:stop() transport_tog = 0 end
@@ -1051,6 +1077,7 @@ function g.key(x, y, z)
       -- track focus
       if x == 2 then
         if focus ~= i then focus = i end
+        if pageNum == 2 then dirtyscreen = true end
       end
       -- note presets
       if x > 3 and x < 6 then
@@ -1085,7 +1112,6 @@ function g.key(x, y, z)
           params:set("step_mode"..i, 3)
         end
       end
-      dirtyscreen = true
     end
     -- track preset
     if x > 11 and x < 14 then
@@ -1106,7 +1132,6 @@ function g.key(x, y, z)
         local i = (y - 5) + (x - 12) * 2
         tp_set = i
         load_track_data()
-        dirtyscreen = true
       end
     end
     dirtyscreen = true
@@ -1212,14 +1237,16 @@ end
 function build_menu()
   for i = 1, 4 do
     if track[i].track_out == 2 then
-      params:show("set_midi_device"..i)
-      params:show("midi_out_channel"..i)
+      params:show("global_midi_channel")
+      params:show("track_midi_device"..i)
+      params:show("track_midi_channel"..i)
       params:show("vel_mode"..i)
       params:show("midi_vel_val"..i)
       params:show("midi_vel_range"..i)
     else
-      params:hide("set_midi_device"..i)
-      params:hide("midi_out_channel"..i)
+      params:hide("global_midi_channel")
+      params:hide("track_midi_device"..i)
+      params:hide("track_midi_channel"..i)
       params:hide("vel_mode"..i)
       params:hide("midi_vel_val"..i)
       params:hide("midi_vel_range"..i)
@@ -1264,6 +1291,32 @@ function build_menu()
   end
   _menu.rebuild_params()
   dirtyscreen = true
+end
+
+function t_refresh()
+  if pageNum == 1 then
+    dirtyscreen = true
+  end
+  dirtygrid = true
+end
+
+function p_refresh()
+  if pageNum == 2 then
+    dirtyscreen = true
+  end
+  dirtygrid = true
+end
+
+function d_refresh()
+  if pageNum == 3 then
+    dirtyscreen = true
+  end
+end
+
+function s_refresh()
+  if pageNum == 4 then
+    dirtyscreen = true
+  end
 end
 
 function redraw_update()
