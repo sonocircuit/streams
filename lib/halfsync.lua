@@ -7,10 +7,10 @@ local div_view = {"1/16", "1/12", "3/32", "1/8", "1/6", "3/16", "1/4","1/3", "3/
 
 -- tape warble
 local warble = {}
-  warble.freq = 8
-  warble.counter = 1
-  warble.slope = 0
-  warble.active = false
+warble.freq = 8
+warble.counter = 1
+warble.slope = 0
+warble.active = false
 
 function halfsync.init()
 	audio.level_cut(1.0)
