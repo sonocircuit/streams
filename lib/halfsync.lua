@@ -47,7 +47,7 @@ function halfsync.init()
   params:add_option("delay_length", "delay rate", div_view, 7)
   params:set_action("delay_length", function() set_del_rate() d_refresh() end)
 
-  params:add_control("delay_length_ft", "adjust rate ", controlspec.new(-10.0, 10.0, 'lin', 0.1, 0, "%"))
+  params:add_control("delay_length_ft", "adjust rate ", controlspec.new(-10, 10, 'lin', 0.1, 0, "%"))
   params:set_action("delay_length_ft", function() set_del_rate() d_refresh() end)
 
   params:add_control("delay_feedback", "delay feedback", controlspec.new(0, 1.0, 'lin', 0 , 0.30 ,""))
@@ -92,9 +92,8 @@ end
 
 function set_del_rate()
 	local tempo = params:get("clock_tempo")
-	local del_rate = ((60 / tempo) * div_options[params:get("delay_length")] * 4) + 1
-	local finetune = del_rate * (params:get("delay_length_ft") / 100)
-	local set_rate = del_rate + finetune
+	local del_rate = ((60 / tempo) * div_options[params:get("delay_length")] * 4)
+	local set_rate = 1 + del_rate - (del_rate * (params:get("delay_length_ft") / 100))
 	softcut.loop_end(1, set_rate)
 end
 
