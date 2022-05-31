@@ -2,7 +2,7 @@
 --
 -- ~~a multi playhead sequencer
 --
--- 1.0.5 @sonocircuit
+-- 1.0.6 @sonocircuit
 -- llllllll.co/t/?????
 --
 --
@@ -1262,25 +1262,11 @@ function build_menu()
     if track[i].track_out == 3 then
       if (params:get("clock_crow_out") == 2 or params:get("clock_crow_out") == 3) then
         params:set("clock_crow_out", 1)
-        params:hide("clock_crow_out")
-        params:hide("clock_crow_out_div")
-        params:hide("clock_crow_in_div")
-      else
-        params:show("clock_crow_out")
-        params:show("clock_crow_out_div")
-        params:show("clock_crow_in_div")
       end
     end
     if track[i].track_out == 4 then
       if (params:get("clock_crow_out") == 4 or params:get("clock_crow_out") == 5) then
         params:set("clock_crow_out", 1)
-        params:hide("clock_crow_out")
-        params:hide("clock_crow_out_div")
-        params:hide("clock_crow_in_div")
-      else
-        params:show("clock_crow_out")
-        params:show("clock_crow_out_div")
-        params:show("clock_crow_in_div")
       end
     end
     if track[i].track_out == 5 then
