@@ -2,7 +2,7 @@
 --
 -- ~~a multi playhead sequencer
 --
--- 1.0.4 @sonocircuit
+-- 1.0.5 @sonocircuit
 -- llllllll.co/t/?????
 --
 --
@@ -59,9 +59,9 @@ local v8_std_1 = 12
 local v8_std_2 = 12
 local env1_amp = 8
 local env1_a = 0
-local env1_d = 0.05
+local env1_d = 0.4
 local env2_a = 0
-local env2_d = 0.05
+local env2_d = 0.4
 local env2_amp = 8
 
 -------- tables --------
@@ -163,13 +163,11 @@ end
 
 held = {}
 heldmax = {}
-done = {}
 first = {}
 second = {}
 for i = 1, 4 do
   held[i] = 0
   heldmax[i] = 0
-  done[i] = 0
   first[i] = 0
   second[i] = 0
 end
@@ -365,6 +363,10 @@ function load_track_data()
     params:set("transpose"..i, set[i].transpose[t_set])
     params:set("n_probability"..i, set[i].note_prob[t_set])
     params:set("s_probability"..i, set[i].step_prob[t_set])
+    if not track[i].running then
+      track[i].pos = track[i].loop_start
+      track[i].reset = true
+    end
   end
   dirtygrid = true
   dirtyscreen = true
@@ -509,7 +511,7 @@ function init()
   params:add_control("env1_attack", "attack", controlspec.new(0.00, 1, "lin", 0.01, 0.00, "s"))
   params:set_action("env1_attack", function(value) env1_a = value end)
 
-  params:add_control("env1_decay", "decay", controlspec.new(0.01, 1, "lin", 0.01, 0.05, "s"))
+  params:add_control("env1_decay", "decay", controlspec.new(0.01, 1, "lin", 0.01, 0.4, "s"))
   params:set_action("env1_decay", function(value) env1_d = value end)
 
   params:add_group("out 3+4", 4)
@@ -522,7 +524,7 @@ function init()
   params:add_control("env2_attack", "attack", controlspec.new(0.00, 1, "lin", 0.01, 0.00, "s"))
   params:set_action("env2_attack", function(value) env2_a = value end)
 
-  params:add_control("env2_decay", "decay", controlspec.new(0.01, 1, "lin", 0.01, 0.05, "s"))
+  params:add_control("env2_decay", "decay", controlspec.new(0.01, 1, "lin", 0.01, 0.4, "s"))
   params:set_action("env2_decay", function(value) env2_d = value end)
 
   params:bang()
@@ -532,9 +534,12 @@ function init()
   reset_pos()
 
   -- metros
-  redrawtimer = metro.init(redraw_update, 1/30, -1) -- refresh rate at 50hz
-  redrawtimer:start()
+  gridredrawtimer = metro.init(grid_update, 1/30, -1)
+  gridredrawtimer:start()
   dirtygrid = true
+
+  screenredrawtimer = metro.init(screen_update, 1/15, -1)
+  screenredrawtimer:start()
   dirtyscreen = true
 
   -- clocks
@@ -546,6 +551,8 @@ function init()
 
   -- pset callback
   params.action_write = function(filename, name)
+
+    save_track_data(t_set)
 
     local pset_string = string.sub(filename, string.len(filename) - 6, -1)
     local number = pset_string:gsub(".pset", "")
@@ -582,6 +589,7 @@ function init()
       io.close(loaded_file)
       local pset_string = string.sub(filename, string.len(filename) - 6, -1)
       local number = pset_string:gsub(".pset", "")
+
       pset_data = tab.load(norns.state.data.."presets/"..number.."/"..pset_id.."_pset.data")
       p_set = pset_data.note_pset
       t_set = pset_data.track_pset
@@ -1319,15 +1327,18 @@ function s_refresh()
   end
 end
 
-function redraw_update()
- if dirtygrid == true then
-   gridredraw()
-   dirtygrid = false
- end
- if dirtyscreen == true then
-   redraw()
-   dirtyscreen = false
- end
+function grid_update()
+  if dirtygrid == true then
+    gridredraw()
+    dirtygrid = false
+  end
+end
+
+function screen_update()
+  if dirtyscreen == true then
+    redraw()
+    dirtyscreen = false
+  end
 end
 
 function drawgrid_connect()
