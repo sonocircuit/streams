@@ -2,7 +2,7 @@
 --
 -- ~~a multi playhead sequencer
 --
--- 1.0.6 @sonocircuit
+-- 1.0.7 @sonocircuit
 -- llllllll.co/t/?????
 --
 --
@@ -178,7 +178,7 @@ function build_scale()
   scale_notes = mu.generate_scale_of_length(params:get("root_note"), params:get("scale_mode"), 20)
   local num_to_add = 20 - #scale_notes
   for i = 1, num_to_add do
-    table.insert(scale_notes, scale_notes[20 - num_to_add]) -- understand why this is needed
+    table.insert(scale_notes, scale_notes[20 - num_to_add])
   end
 end
 
@@ -444,7 +444,7 @@ function init()
     params:set_action("jf_voice"..i, function(vox) set_crow[i].jf_ch = vox end)
     params:hide("jf_voice"..i)
 
-    params:add_control("jf_amp"..i, "jf level", controlspec.new(0.1, 5, "lin", 0.1, 5.0, "vpp"))
+    params:add_control("jf_amp"..i, "jf level", controlspec.new(0.1, 10, "lin", 0.1, 8.0, "vpp"))
     params:set_action("jf_amp"..i, function(level) set_crow[i].jf_amp = level end)
     params:hide("jf_amp"..i)
 
@@ -683,40 +683,44 @@ function step(i)
       if math.random(100) <= track[i].note_prob then
         -- play notes if not rest
         if pattern.rests[p_set][track[i].pos] < 1 then
-          local note_num = scale_notes[util.clamp(pattern.notes[p_set][track[i].pos] + track[i].transpose,1, 20)] + track[i].octave * 12
-          local freq = mu.note_num_to_freq(note_num)
-          -- engine output
-          if track[i].track_out == 1 then
-            engine.hz(freq)
-          -- midi output
-          elseif track[i].track_out == 2 then
-            if params:get("vel_mode"..i) == 2 then
-              set_midi[i].velocity = math.random(set_midi[i].vel_lo, set_midi[i].vel_hi)
-            else
-              set_midi[i].velocity = set_midi[i].vel
-            end
-            m[i]:note_on(note_num, set_midi[i].velocity, set_midi[i].ch)
-            table.insert(set_midi[i].active_notes, note_num)
-          -- crow output 1+2
-          elseif track[i].track_out == 3 then
-            crow.output[1].volts = ((note_num - 60) / v8_std_1)
-            crow.output[2].action = "{ to(0, 0), to("..env1_amp..", "..env1_a.."), to(0, "..env1_d..", 'log') }"
-            crow.output[2]()
-          -- crow output 3+4
-          elseif track[i].track_out == 4 then
-            crow.output[3].volts = ((note_num - 60) / v8_std_2)
-            crow.output[4].action = "{ to(0, 0), to("..env2_amp..", "..env2_a.."), to(0, "..env2_d..", 'log') }"
-            crow.output[4]()
-          -- crow ii jf
-          elseif track[i].track_out == 5 then
-            if params:get("jf_mode"..i) == 1 then
-              crow.ii.jf.play_voice(set_crow[i].jf_ch, ((note_num - 60) / 12), set_crow[i].jf_amp)
-            else
-              crow.ii.jf.play_note(((note_num - 60) / 12), set_crow[i].jf_amp)
-            end
-          end
+          play_voice(i)
         end
       end
+    end
+  end
+end
+
+function play_voice(i)
+  local note_num = scale_notes[util.clamp(pattern.notes[p_set][track[i].pos] + track[i].transpose,1, 20)] + track[i].octave * 12
+  local freq = mu.note_num_to_freq(note_num)
+  -- engine output
+  if track[i].track_out == 1 then
+    engine.hz(freq)
+  -- midi output
+  elseif track[i].track_out == 2 then
+    if params:get("vel_mode"..i) == 2 then
+      set_midi[i].velocity = math.random(set_midi[i].vel_lo, set_midi[i].vel_hi)
+    else
+      set_midi[i].velocity = set_midi[i].vel
+    end
+    m[i]:note_on(note_num, set_midi[i].velocity, set_midi[i].ch)
+    table.insert(set_midi[i].active_notes, note_num)
+  -- crow output 1+2
+  elseif track[i].track_out == 3 then
+    crow.output[1].volts = ((note_num - 60) / v8_std_1)
+    crow.output[2].action = "{ to(0, 0), to("..env1_amp..", "..env1_a.."), to(0, "..env1_d..", 'log') }"
+    crow.output[2]()
+  -- crow output 3+4
+  elseif track[i].track_out == 4 then
+    crow.output[3].volts = ((note_num - 60) / v8_std_2)
+    crow.output[4].action = "{ to(0, 0), to("..env2_amp..", "..env2_a.."), to(0, "..env2_d..", 'log') }"
+    crow.output[4]()
+  -- crow ii jf
+  elseif track[i].track_out == 5 then
+    if params:get("jf_mode"..i) == 1 then
+      crow.ii.jf.play_voice(set_crow[i].jf_ch, ((note_num - 60) / 12), set_crow[i].jf_amp)
+    else
+      crow.ii.jf.play_note(((note_num - 60) / 12), set_crow[i].jf_amp)
     end
   end
 end
@@ -1043,6 +1047,9 @@ function g.key(x, y, z)
           end
         else
           track[i].pos = x
+          if not track[i].running then
+            play_voice(i)
+          end
         end
       elseif set_rate then
         params:set("rate"..i, x)
