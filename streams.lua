@@ -2,7 +2,7 @@
 --
 -- ~~a multi playhead sequencer
 --
--- 1.0.7 @sonocircuit
+-- 1.1.0 @sonocircuit
 -- llllllll.co/t/?????
 --
 --
@@ -21,17 +21,19 @@
 --
 --
 
-engine.name = "Thebangs"
--- ;install https://github.com/catfact/thebangs
+engine.name = "Moonshine"
 
-thebangs = include('lib/thebangs_engine')
-halfsync = include('lib/halfsync')
+local softsync = include('lib/streams_softsync')
+local format = require 'formatters'
 
-mu = require "musicutil"
+local mu = require "musicutil"
 
-g = grid.connect()
+local g = grid.connect()
+
 
 -------- variables --------
+local pset_load = false
+local default_pset = 6
 
 local pageNum = 1
 local edit = 1
@@ -51,8 +53,9 @@ local set_oct = false
 local set_trsp = false
 local altgrid = false
 local viewinfo = 0
+local freeze = 0
 
-local transport = 1 -- 1 is off, 0 is on
+local transport = 0
 local transport_tog = 0
 
 local v8_std_1 = 12
@@ -64,24 +67,24 @@ local env2_a = 0
 local env2_d = 0.4
 local env2_amp = 8
 
+
 -------- tables --------
+local scale_names = {}
+local scale_notes = {}
 
-scale_names = {}
-scale_notes = {}
-
-options = {}
+local options = {}
 options.rate_val = {"2", "1", "3/4", "2/3", "1/2", "3/8", "1/3", "1/4", "3/16", "1/6", "1/8", "3/32", "1/12", "1/16", "3/64", "1/32"}
 options.rate_num = {2, 1, 3/4, 2/3, 1/2, 3/8, 1/3, 1/4, 3/16, 1/6, 1/8, 3/32, 1/12, 1/16, 3/64, 1/32}
 options.direction = {"fwd", "rev"}
 options.dir_mode = {"normal", "pendulum", "random"}
 options.rnd_mode = {"jump", "drunk"}
-options.gbl_out = {"per track", "thebangs", "midi", "crow ii jf"}
-options.ind_out = {"thebangs", "midi", "crow 1+2", "crow 3+4", "crow ii jf"}
+options.gbl_out = {"per track", "moonshine", "midi", "crow ii jf", "crow ii wsyn"}
+options.ind_out = {"moonshine", "midi", "crow 1+2", "crow 3+4", "crow ii jf", "crow ii wsyn"}
 options.octave = {-3, -2, -1, 0, 1, 2, 3}
-options.pages = {"SEQUENCE", "TRACK", "DELAY", "SYNTH"}
+options.pages = {"SEQUENCE", "TRACK   PLAYHEAD", "TRACK   SOUND", "DELAY"}
 options.tracks = {"off", "track 1", "track 2", "track 3", "track 4"}
 
-pattern = {}
+local pattern = {}
 pattern.notes = {}
 pattern.rests = {}
 for i = 1, 4 do -- 4 note and rest presets
@@ -93,7 +96,7 @@ for i = 1, 4 do -- 4 note and rest presets
   end
 end
 
-track = {}
+local track = {}
 for i = 1, 4 do -- 4 tracks
   track[i] = {}
   track[i].loop_start = 1
@@ -112,7 +115,7 @@ for i = 1, 4 do -- 4 tracks
   track[i].track_out = 1
 end
 
-set = {}
+local set = {}
 for i = 1, 4 do -- 4 tracks
   set[i] = {}
   set[i].loop_start = {}
@@ -137,7 +140,7 @@ for i = 1, 4 do -- 4 tracks
   end
 end
 
-set_midi = {}
+local set_midi = {}
 for i = 1, 4 do -- 4 tracks
   set_midi[i] = {}
   set_midi[i].ch = 1
@@ -149,22 +152,23 @@ for i = 1, 4 do -- 4 tracks
   set_midi[i].active_notes = {}
 end
 
-set_crow = {}
+local set_crow = {}
 for i = 1, 4 do -- 4 tracks
   set_crow[i] = {}
   set_crow[i].jf_ch = i
   set_crow[i].jf_amp = 5
+  set_crow[i].wsyn_amp = 5
 end
 
-m = {}
+local m = {}
 for i = 0, 4 do
   m[i] = midi.connect()
 end
 
-held = {}
-heldmax = {}
-first = {}
-second = {}
+local held = {}
+local heldmax = {}
+local first = {}
+local second = {}
 for i = 1, 4 do
   held[i] = 0
   heldmax[i] = 0
@@ -172,8 +176,8 @@ for i = 1, 4 do
   second[i] = 0
 end
 
--------- track settings --------
 
+-------- track settings --------
 function build_scale()
   scale_notes = mu.generate_scale_of_length(params:get("root_note"), params:get("scale_mode"), 20)
   local num_to_add = 20 - #scale_notes
@@ -196,6 +200,9 @@ function set_track_output()
     elseif glb_out == 4 then
       track[i].track_out = 5
       params:set("jf_mode"..i, 2)
+    elseif glb_out == 5 then
+      track[i].track_out = 6
+      crow.ii.wsyn.voices(4)
     end
   end
   if glb_out == 4 then
@@ -222,7 +229,7 @@ function set_loop_start(i, startpoint)
   if track[i].loop_start >= track[i].loop_end then
     params:set("loop_end"..i, track[i].loop_start)
   end
-  p_refresh()
+  page_redraw(2)
 end
 
 function set_loop_end(i, endpoint)
@@ -230,11 +237,11 @@ function set_loop_end(i, endpoint)
   if track[i].loop_end <= track[i].loop_start then
     params:set("loop_start"..i, track[i].loop_end)
   end
-  p_refresh()
+  page_redraw(2)
 end
 
--------- midi --------
 
+-------- midi --------
 function build_midi_device_list()
   midi_devices = {}
   for i = 1, #midi.vports do
@@ -244,11 +251,11 @@ function build_midi_device_list()
   end
 end
 
-function midi.add() -- MIDI register callback
+function midi_connect() -- MIDI register callback
   build_midi_device_list()
 end
 
-function midi.remove() -- MIDI remove callback
+function midi_disconnect() -- MIDI remove callback
   clock.run(
     function()
       clock.sleep(0.2)
@@ -264,6 +271,7 @@ function clock.transport.start()
         track[i].running = true
       end
     end
+    transport = 1
   end
 end
 
@@ -274,8 +282,9 @@ function clock.transport.stop()
       reset_pos()
       notes_off(i)
     end
+    transport = 1
   end
-  dirtyscreen = true
+  page_redraw(1)
   dirtygrid = true
 end
 
@@ -298,10 +307,11 @@ end
 function set_velocity(i)
   set_midi[i].vel_hi = util.clamp(set_midi[i].vel + set_midi[i].vel_range, 1, 127)
   set_midi[i].vel_lo = util.clamp(set_midi[i].vel - set_midi[i].vel_range, 1, 127)
+  page_redraw(3)
 end
 
--------- defaults and presets --------
 
+-------- defaults and presets --------
 function set_defaults()
   -- track 1
   params:set("loop_start"..1, 3)
@@ -372,8 +382,14 @@ function load_track_data()
   dirtyscreen = true
 end
 
--------- init function --------
 
+-------- utils --------
+function round_form(param, quant, form)
+  return(util.round(param, quant)..form)
+end
+
+
+-------- init function --------
 function init()
 
   -- populate scale_names table
@@ -382,7 +398,7 @@ function init()
   end
 
   -- scale params
-  params:add_separator("global settings")
+  params:add_separator("global_settings", "global settings")
 
   params:add_option("global_out", "output", options.gbl_out, 1)
   params:set_action("global_out", function() set_track_output() build_menu() end)
@@ -393,93 +409,126 @@ function init()
   params:add_number("root_note", "root note", 24, 84, 48, function(param) return mu.note_num_to_name(param:get(), true) end)
   params:set_action("root_note", function() build_scale() end)
 
+  params:add_option("loop_set_keys", "quick loop set", {"no", "yes"}, 1)
+
   -- midi params
   build_midi_device_list()
+
+  params:add_group("global_midi_params", "global midi", 3)
 
   params:add_option("global_midi_device", "midi device", midi_devices, 1)
   params:set_action("global_midi_device", function(val) m[0] = midi.connect(val) set_track_output() end)
 
-  params:add_number("global_midi_channel", "global midi channel", 1, 16, 1)
+  params:add_number("global_midi_channel", "midi channel", 1, 16, 1)
   params:set_action("global_midi_channel", function(val) all_notes_off() set_track_output() end)
-  params:hide("global_midi_channel")
 
   params:add_option("midi_trnsp", "midi transport", {"off", "send", "receive"}, 1)
 
   -- track params
-  params:add_separator("tracks")
+  params:add_separator("tracks", "tracks")
   for i = 1, 4 do
-    params:add_group("track "..i, 24)
+    params:add_group("track_"..i, "track "..i, 37)
 
-    params:add_separator("output")
+    params:add_separator("output_"..i, "output")
     params:add_option("track_out"..i, "output", options.ind_out, 1)
     params:set_action("track_out"..i, function() set_track_output() build_menu() end)
 
+    params:add_binary("track_transport"..i, "run/stop", "trigger")
+    params:set_action("track_transport"..i, function() transport_track(i) end)
+
+    -- moonshine params
+    params:add_separator("moon_synthesis"..i, "moonshine settings")
+    -- amp
+    params:add_control("moon_amp"..i, "level", controlspec.new(0, 1, "lin", 0, 0.8), function(param) return (round_form(param:get() * 100, 1, "%")) end)
+    params:set_action("moon_amp"..i, function(x) engine.amp(i, x / 2) end) 
+    -- sub division
+    params:add_number("moon_sub_div"..i, "sub division", 1, 10, 1)
+    params:set_action("moon_sub_div"..i, function(x) engine.sub_div(i, x) end)
+    -- noise level
+    params:add_control("moon_noise_amp"..i, "noise level", controlspec.new(0, 2, "lin", 0, 0), function(param) return (round_form(param:get() * 50, 1, "%")) end)
+    params:set_action("moon_noise_amp"..i, function(x) engine.noise_amp(i, x) end)
+    -- cutoff
+    params:add_control("moon_cutoff"..i, "cutoff", controlspec.new(20, 20000, "exp", 0, 1200), function(param) return (round_form(param:get(), 0.01, " hz")) end)
+    params:set_action("moon_cutoff"..i, function(x) engine.cutoff(i, x) page_redraw(3) end)
+    -- filter env
+    params:add_number("moon_cutoff_env"..i, "filter env", 0, 1, 0, function(param) return (param:get() == 1 and "on" or "off") end)
+    params:set_action("moon_cutoff_env"..i, function(x) engine.cutoff_env(i, x) end)
+    -- resonance
+    params:add_control("moon_resonance"..i, "filter q", controlspec.new(0, 4, "lin", 0, 0.8), function(param) return (round_form(util.linlin(0, 4, 0, 100, param:get()), 1, "%")) end)
+    params:set_action("moon_resonance"..i, function(x) engine.resonance(i, x) page_redraw(3) end)
+    -- attack
+    params:add_control("moon_attack"..i, "attack", controlspec.new(0.001, 10, "exp", 0, 0), function(param) return (round_form(param:get(),0.01," s")) end)
+    params:set_action("moon_attack"..i, function(x) engine.attack(i, x) page_redraw(3) end)
+    -- release
+    params:add_control("moon_release"..i, "release", controlspec.new(0.001, 10, "exp", 0, 0.3), function(param) return (round_form(param:get(), 0.01, " s")) end)
+    params:set_action("moon_release"..i, function(x) engine.release(i, x) page_redraw(3) end)
+    -- pan
+    params:add_control("moon_pan"..i, "pan", controlspec.new(-1, 1, "lin", 0, 0), format.bipolar_as_pan_widget)
+    params:set_action("moon_pan"..i, function(x) engine.pan(i, x) end)
+
     -- midi params
+    params:add_separator("midi_params_"..i, "midi settings")
+
     params:add_option("track_midi_device"..i, "midi device", midi_devices, 1)
-    params:set_action("track_midi_device"..i, function(val) m[i] = midi.connect(val) end)
-    params:hide("track_midi_device"..i)
+    params:set_action("track_midi_device"..i, function(val) m[i] = midi.connect(val) page_redraw(3) end)
 
     params:add_number("track_midi_channel"..i, "midi channel", 1, 16, 1)
-    params:set_action("track_midi_channel"..i, function(val) notes_off(i) set_midi[i].ch = val end)
-    params:hide("track_midi_channel"..i)
+    params:set_action("track_midi_channel"..i, function(val) notes_off(i) set_midi[i].ch = val page_redraw(3) end)
 
     params:add_option("vel_mode"..i, "velocity mode", {"fixed", "random"}, 1)
     params:set_action("vel_mode"..i, function() set_velocity(i) end)
-    params:hide("vel_mode"..i)
 
     params:add_number("midi_vel_val"..i, "velocity value", 1, 127, 100)
-    params:set_action("midi_vel_val"..i, function(val) set_midi[i].vel = val set_velocity(i) end) --set_vel_range()
-    params:hide("midi_vel_val"..i)
+    params:set_action("midi_vel_val"..i, function(val) set_midi[i].vel = val set_velocity(i) end)
 
     params:add_number("midi_vel_range"..i, "velocity range ±", 1, 127, 20)
     params:set_action("midi_vel_range"..i, function(val) set_midi[i].vel_range = val set_velocity(i) end)
-    params:hide("midi_vel_range"..i)
 
     -- jf params
+    params:add_separator("jf_params_"..i, "jf settings")
+
     params:add_option("jf_mode"..i, "jf_mode", {"vox", "note"}, 1)
-    params:set_action("jf_mode"..i, function() build_menu() end)
-    params:hide("jf_mode"..i)
+    params:set_action("jf_mode"..i, function() build_menu() page_redraw(3) end)
 
     params:add_number("jf_voice"..i, "jf voice", 1, 6, i)
-    params:set_action("jf_voice"..i, function(vox) set_crow[i].jf_ch = vox end)
-    params:hide("jf_voice"..i)
+    params:set_action("jf_voice"..i, function(num) set_crow[i].jf_ch = num page_redraw(3) end)
 
-    params:add_control("jf_amp"..i, "jf level", controlspec.new(0.1, 10, "lin", 0.1, 8.0, "vpp"))
-    params:set_action("jf_amp"..i, function(level) set_crow[i].jf_amp = level end)
-    params:hide("jf_amp"..i)
+    params:add_control("jf_amp"..i, "jf level", controlspec.new(0, 10, "lin", 0, 8.0, "vpp"))
+    params:set_action("jf_amp"..i, function(v) set_crow[i].jf_amp = v page_redraw(3) end)
 
     -- playhead params
-    params:add_separator("playhead")
-    params:add_number("s_probability"..i, "step probability", 0, 100, 100, function(param) return (param:get().." %") end)
-    params:set_action("s_probability"..i, function(x) track[i].step_prob = x p_refresh() end)
+    params:add_separator("playhead_"..i, "playhead")
+
+    params:add_number("s_probability"..i, "step probability", 0, 100, 100, function(param) return (param:get().."%") end)
+    params:set_action("s_probability"..i, function(x) track[i].step_prob = x page_redraw(2) end)
 
     params:add_option("rate"..i, "rate", options.rate_val, 8)
-    params:set_action("rate"..i, function(idx) track[i].rate = options.rate_num[idx] * 4 p_refresh() end)
+    params:set_action("rate"..i, function(idx) track[i].rate = options.rate_num[idx] * 4 page_redraw(2) end)
 
     params:add_option("direction"..i, "direction", options.direction, 1)
-    params:set_action("direction"..i, function(x) track[i].dir = x - 1 p_refresh() end)
+    params:set_action("direction"..i, function(x) track[i].dir = x - 1 page_redraw(2) dirtygrid = true end)
 
     params:add_option("step_mode"..i, "step mode", options.dir_mode, 1)
-    params:set_action("step_mode"..i, function(x) track[i].dir_mode = x - 1 p_refresh() end)
+    params:set_action("step_mode"..i, function(x) track[i].dir_mode = x - 1 page_redraw(2) dirtygrid = true end)
 
     params:add_option("rnd_mode"..i, "random mode", options.rnd_mode, 1)
 
     -- sequence params
-    params:add_separator("sequence")
-    params:add_number("n_probability"..i, "note probability", 0, 100, 100, function(param) return (param:get().." %") end)
-    params:set_action("n_probability"..i, function(x) track[i].note_prob = x p_refresh() end)
+    params:add_separator("sequence_"..i, "sequence")
+    params:add_number("n_probability"..i, "note probability", 0, 100, 100, function(param) return (param:get().."%") end)
+    params:set_action("n_probability"..i, function(x) track[i].note_prob = x page_redraw(2) end)
 
     params:add_option("octave"..i, "octave",  options.octave, 4)
-    params:set_action("octave"..i, function(idx) track[i].octave = options.octave[idx] p_refresh() end)
+    params:set_action("octave"..i, function(idx) track[i].octave = options.octave[idx] page_redraw(2) end)
 
     params:add_number("transpose"..i, "transpose", -7, 7, 0, function(param) return (param:get().." deg") end)
-    params:set_action("transpose"..i, function(x) track[i].transpose = x p_refresh() end)
+    params:set_action("transpose"..i, function(x) track[i].transpose = x page_redraw(2) end)
 
     params:add_number("loop_start"..i, "start position", 1, 16, 1)
-    params:set_action("loop_start"..i, function(x) set_loop_start(i, x) end)
+    params:set_action("loop_start"..i, function(x) set_loop_start(i, x) dirtygrid = true end)
 
     params:add_number("loop_end"..i, "end position", 1, 16, 16)
-    params:set_action("loop_end"..i, function(x) set_loop_end(i, x) end)
+    params:set_action("loop_end"..i, function(x) set_loop_end(i, x) dirtygrid = true end)
 
     params:add_option("track_reset"..i, "position reset", options.tracks, 1)
     params:hide("track_reset"..i)
@@ -487,58 +536,88 @@ function init()
     params:add_option("midi_trnsp_enable"..i, "midi start msg", {"ignore", "follow"}, 2)
 
   end
-
-  params:add_separator("sound")
-
-  -- delay params
-  params:add_group("delay", 8)
-  halfsync.init()
-
-  -- engine params
-  params:add_group("thebangs", 8)
-  thebangs.synth_params()
-
+  
   -- crow params
-  params:add_separator("crow")
+  params:add_separator("crow", "crow")
 
   params:add_group("out 1+2", 4)
   params:add_option("v8_type_1", "v/oct type", {"1 v/oct", "1.2 v/oct"}, 1)
-  params:set_action("v8_type_1", function(x) if x == 1 then v8_std_1 = 12 else v8_std_1 = 10 end end)
+  params:set_action("v8_type_1", function(x) if x == 1 then v8_std_1 = 12 else v8_std_1 = 10 end page_redraw(3) end)
 
   params:add_control("env1_amplitude", "env amplitude", controlspec.new(0.1, 10, "lin", 0.1, 8, "v"))
-  params:set_action("env1_amplitude", function(value) env1_amp = value end)
+  params:set_action("env1_amplitude", function(value) env1_amp = value page_redraw(3) end)
 
   params:add_control("env1_attack", "attack", controlspec.new(0.00, 1, "lin", 0.01, 0.00, "s"))
-  params:set_action("env1_attack", function(value) env1_a = value end)
+  params:set_action("env1_attack", function(value) env1_a = value page_redraw(3) end)
 
   params:add_control("env1_decay", "decay", controlspec.new(0.01, 1, "lin", 0.01, 0.4, "s"))
-  params:set_action("env1_decay", function(value) env1_d = value end)
+  params:set_action("env1_decay", function(value) env1_d = value page_redraw(3) end)
 
   params:add_group("out 3+4", 4)
   params:add_option("v8_type_2", "v/oct type", {"1 v/oct", "1.2 v/oct"}, 1)
-  params:set_action("v8_type_2", function(x) if x == 1 then v8_std_2 = 12 else v8_std_2 = 10 end end)
+  params:set_action("v8_type_2", function(x) if x == 1 then v8_std_2 = 12 else v8_std_2 = 10 end page_redraw(3) end)
 
   params:add_control("env2_amplitude", "env amplitude", controlspec.new(0.1, 10, "lin", 0.1, 8, "v"))
-  params:set_action("env2_amplitude", function(value) env2_amp = value end)
+  params:set_action("env2_amplitude", function(value) env2_amp = value page_redraw(3) end)
 
   params:add_control("env2_attack", "attack", controlspec.new(0.00, 1, "lin", 0.01, 0.00, "s"))
-  params:set_action("env2_attack", function(value) env2_a = value end)
+  params:set_action("env2_attack", function(value) env2_a = value page_redraw(3) end)
 
   params:add_control("env2_decay", "decay", controlspec.new(0.01, 1, "lin", 0.01, 0.4, "s"))
-  params:set_action("env2_decay", function(value) env2_d = value end)
+  params:set_action("env2_decay", function(value) env2_d = value page_redraw(3) end)
 
-  params:bang()
+  params:add_group("wsyn_params", "wsyn", 10)
+ 
+  params:add_option("wysn_mode", "wsyn mode", {"hold", "lpg"}, 2)
+  params:set_action("wysn_mode", function(mode) crow.ii.wsyn.ar_mode(mode - 1) end)
+
+  params:add_control("wsyn_amp", "level", controlspec.new(0, 10, "lin", 0, 5, "vpp"))
+  params:set_action("wsyn_amp", function(level) set_crow[1].wsyn_amp = level end)
+  
+  params:add_control("wsyn_curve", "curve",  controlspec.new(-5, 5, "lin", 0, 5, "v"))
+  params:set_action("wsyn_curve", function(v) crow.ii.wsyn.curve(v) page_redraw(3) end)
+  
+  params:add_control("wsyn_ramp", "ramp", controlspec.new(-5, 5, "lin", 0, 0, "v"))
+  params:set_action("wsyn_ramp", function(v) crow.ii.wsyn.ramp(v) page_redraw(3) end)
+  
+  params:add_control("wsyn_lpg_time", "lpg time", controlspec.new(-5, 5, "lin", 0, 0, "v"))
+  params:set_action("wsyn_lpg_time", function(v) crow.ii.wsyn.lpg_time(v) page_redraw(3) end)
+  
+  params:add_control("wsyn_lpg_sym", "lpg symmetry", controlspec.new(-5, 5, "lin", 0, -5, "v"))
+  params:set_action("wsyn_lpg_sym", function(v) crow.ii.wsyn.lpg_symmetry(v) page_redraw(3) end)
+  
+  params:add_control("wsyn_fm_index", "fm index", controlspec.new(-5, 5, "lin", 0, 0, "v"))
+  params:set_action("wsyn_fm_index", function(v) crow.ii.wsyn.fm_index(v) end)
+  
+  params:add_control("wsyn_fm_env", "fm envelope", controlspec.new(-5, 5, "lin", 0, 0, "v"))
+  params:set_action("wsyn_fm_env", function(v) crow.ii.wsyn.fm_env(v) end)
+  
+  params:add_number("wsyn_fm_num", "fm ratio num", 1, 16, 1, function(param) return (param:get().."/"..params:get("wsyn_fm_den")) end)
+  params:set_action("wsyn_fm_num", function(num) crow.ii.wsyn.fm_ratio(num, params:get("wsyn_fm_den")) end)
+  
+  params:add_number("wsyn_fm_den", "fm ratio denom", 1, 16, 2, function(param) return (params:get("wsyn_fm_num").."/"..param:get()) end)
+  params:set_action("wsyn_fm_den", function(denom) crow.ii.wsyn.fm_ratio(params:get("wsyn_fm_num"), denom) end)
+
+  params:add_separator("delay_params", "delay")
+  softsync.init()
+
+  -- bang params
+  if pset_load then
+    params:read(default_pset)
+  else
+    params:bang()
+  end
 
   set_defaults()
   transport_all()
   reset_pos()
 
   -- metros
-  gridredrawtimer = metro.init(grid_update, 1/30, -1)
+  gridredrawtimer = metro.init(grid_redraw, 1/30, -1)
   gridredrawtimer:start()
   dirtygrid = true
 
-  screenredrawtimer = metro.init(screen_update, 1/15, -1)
+  screenredrawtimer = metro.init(screen_redraw, 1/15, -1)
   screenredrawtimer:start()
   dirtyscreen = true
 
@@ -547,7 +626,10 @@ function init()
     clock.run(step, i)
   end
 
+  -- hardware callbacks
   grid.add = drawgrid_connect
+  midi.add = midi_connect
+  midi.remove = midi_disconnect
 
   -- pset callback
   params.action_write = function(filename, name)
@@ -590,7 +672,7 @@ function init()
       local pset_string = string.sub(filename, string.len(filename) - 6, -1)
       local number = pset_string:gsub(".pset", "")
 
-      pset_data = tab.load(norns.state.data.."presets/"..number.."/"..pset_id.."_pset.data")
+      local pset_data = tab.load(norns.state.data.."presets/"..number.."/"..pset_id.."_pset.data")
       p_set = pset_data.note_pset
       t_set = pset_data.track_pset
       tp_set = pset_data.prevtrack_pset
@@ -613,11 +695,10 @@ function init()
       print("finished reading '"..filename.."'")
     end
   end
-
 end
 
--------- sequencer --------
 
+-------- sequencer --------
 function step(i)
   while true do
     clock.sync(track[i].rate)
@@ -626,7 +707,8 @@ function step(i)
       -- step playhead
       if track[i].dir_mode == 2 and params:get("rnd_mode"..i) == 1 then
         track[i].pos = math.random(track[i].loop_start, track[i].loop_end)
-        t_refresh()
+        dirtygrid = true
+        page_redraw(1)
       else
         if track[i].dir == 0 then
           if math.random(100) <= track[i].step_prob then
@@ -671,7 +753,8 @@ function step(i)
             end
           end
         end
-        t_refresh()
+        page_redraw(1)
+        dirtygrid = true
       end
       -- send midi start msg
       if params:get("midi_trnsp") == 2 and transport_tog == 0 then
@@ -679,9 +762,7 @@ function step(i)
         transport_tog = 1
       end
       -- play notes
-      -- note probability
       if math.random(100) <= track[i].note_prob then
-        -- play notes if not rest
         if pattern.rests[p_set][track[i].pos] < 1 then
           play_voice(i)
         end
@@ -695,7 +776,7 @@ function play_voice(i)
   local freq = mu.note_num_to_freq(note_num)
   -- engine output
   if track[i].track_out == 1 then
-    engine.hz(freq)
+    engine.trig(i, freq)
   -- midi output
   elseif track[i].track_out == 2 then
     if params:get("vel_mode"..i) == 2 then
@@ -722,11 +803,13 @@ function play_voice(i)
     else
       crow.ii.jf.play_note(((note_num - 60) / 12), set_crow[i].jf_amp)
     end
+  elseif track[i].track_out == 6 then
+    crow.ii.wsyn.play_voice(i, ((note_num - 60) / 12), set_crow[1].wsyn_amp)
   end
 end
 
 function transport_all()
-  if transport == 0 then
+  if transport == 1 then
     for i = 1, 4 do
       track[i].running = true
     end
@@ -737,6 +820,25 @@ function transport_all()
       notes_off(i)
     end
   end
+end
+
+function transport_track(i)
+  track[i].running = not track[i].running
+  if not track[i].running then
+    notes_off(i)
+  end
+  local run_count = 0
+  for j = 1, 4 do
+    if track[j].running then
+      run_count = run_count + 1
+    end
+  end
+  if run_count > 0 then
+    transport = 1
+  else
+    transport = 0
+  end
+  dirtygrid = true
 end
 
 function reset_pos()
@@ -752,12 +854,31 @@ function randomize_notes()
   end
 end
 
--------- norns interface --------
+
+-------- norns UI --------
+local params_a = {"moon_cutoff", "track_midi_device", "v8_type_1", "v8_type_2", "jf_mode", "wsyn_curve"}
+local params_b = {"moon_resonance", "track_midi_channel", "env1_amplitude", "env2_amplitude", "jf_amp", "wsyn_ramp"}
+local params_c = {"moon_attack", "midi_vel_val", "env1_attack", "env2_attack", "jf_voice", "wsyn_lpg_time"}
+local params_d = {"moon_release", "vel_mode", "env1_decay", "env2_decay", "", "wsyn_lpg_sym"}
+
+local params_e = {"moon_amp", "track_midi_device", "v8_type_1", "v8_type_2", "jf_mode", "wsyn_fm_index"}
+local params_f = {"moon_noise_amp", "track_midi_channel", "env1_amplitude", "env2_amplitude", "jf_amp", "wsyn_fm_env"}
+local params_g = {"moon_cutoff_env", "midi_vel_range", "env1_attack", "env2_attack", "jf_voice", "wsyn_fm_num"}
+local params_h = {"moon_sub_div", "vel_mode", "env1_decay", "env2_decay", "", "wsyn_fm_den"}
+
+local display_a = {"cutoff", "midi device", "type", "type", "jf mode", "curve"}
+local display_b = {"resonance", "channel", "env amp", "env amp", "jf level", "ramp"}
+local display_c = {"attack", "velocity", "attack", "attack", "jf voice", "lpg time"}
+local display_d = {"release", "mode", "decay", "decay", "", "lpg sym"}
+
+local display_e = {"level", "midi device", "type", "type", "jf mode", "fm index"}
+local display_f = {"noise", "channel", "env amp", "env amp", "jf level", "fm env"}
+local display_g = {"cutoff env", "range ±", "attack", "attack", "jf voice", "ratio num"}
+local display_h = {"sub div", "mode", "decay", "decay", "", "ratio denom"}
 
 function enc(n, d)
   if n == 1 then
     pageNum = util.clamp(pageNum + d, 1, #options.pages)
-    dirtyscreen = true
   end
   if pageNum == 1 then
     if n == 2 then
@@ -765,7 +886,6 @@ function enc(n, d)
     elseif n == 3 then
       pattern.notes[p_set][edit] = util.clamp(pattern.notes[p_set][edit] + d, 1, 20)
     end
-    dirtyscreen = true
   elseif pageNum == 2 then
     if viewinfo == 0 then
       if n == 2 then
@@ -785,7 +905,74 @@ function enc(n, d)
       end
     end
   elseif pageNum == 3 then
-        if viewinfo == 0 then
+    local output = track[focus].track_out
+    if shift then
+      if viewinfo == 0 then
+        if n == 2 then
+          if ((output == 3 or output == 4) or output == 6) then
+            params:delta(params_e[output], d)
+          else
+            params:delta(params_e[output]..focus, d)
+          end
+        elseif n == 3 then
+          if ((output == 3 or output == 4) or output == 6) then
+            params:delta(params_f[output], d)
+          else
+            params:delta(params_f[output]..focus, d)
+          end
+        end
+      else
+        if n == 2 then
+          if ((output == 3 or output == 4) or output == 6) then
+            params:delta(params_g[output], d)
+          else
+            params:delta(params_g[output]..focus, d)
+          end
+        elseif n == 3 then
+          if params_h[output] == "" then
+            --return
+          elseif ((output == 3 or output == 4) or output == 6) then
+            params:delta(params_h[output], d)
+          else
+            params:delta(params_h[output]..focus, d)
+          end
+        end
+      end
+    else
+      if viewinfo == 0 then
+        if n == 2 then
+          if ((output == 3 or output == 4) or output == 6) then
+            params:delta(params_a[output], d)
+          else
+            params:delta(params_a[output]..focus, d)
+          end
+        elseif n == 3 then
+          if ((output == 3 or output == 4) or output == 6) then
+            params:delta(params_b[output], d)
+          else
+            params:delta(params_b[output]..focus, d)
+          end
+        end
+      else
+        if n == 2 then
+          if ((output == 3 or output == 4) or output == 6) then
+            params:delta(params_c[output], d)
+          else
+            params:delta(params_c[output]..focus, d)
+          end
+        elseif n == 3 then
+          if params_d[output] == "" then
+            --return
+          elseif ((output == 3 or output == 4) or output == 6) then
+            params:delta(params_d[output], d)
+          else
+            params:delta(params_d[output]..focus, d)
+          end
+        end
+      end
+    end
+  elseif pageNum == 4 then
+    if viewinfo == 0 then
       if n == 2 then
         params:delta("delay_level", d)
       elseif n == 3 then
@@ -793,26 +980,15 @@ function enc(n, d)
       end
     else
       if n == 2 then
-        params:delta("delay_feedback", d)
+        if freeze == 0 then
+          params:delta("delay_feedback", d)
+        end
       elseif n == 3 then
         params:delta("delay_length_ft", d)
       end
     end
-  elseif pageNum == 4 then
-        if viewinfo == 0 then
-      if n == 2 then
-        params:delta("bangs_cutoff", d)
-      elseif n == 3 then
-        params:delta("bangs_pw", d)
-      end
-    else
-      if n == 2 then
-        params:delta("bangs_attack", d)
-      elseif n == 3 then
-        params:delta("bangs_release", d)
-      end
-    end
   end
+  dirtyscreen = true
 end
 
 function key(n, z)
@@ -834,10 +1010,26 @@ function key(n, z)
         randomize_notes()
       end
     end
-  elseif (pageNum == 2 or pageNum == 3 or pageNum == 4) then
+  elseif (pageNum == 2 or pageNum == 3) then
     if n == 2 then
       if z == 1 then
         viewinfo = 1 - viewinfo
+      end
+    end
+  elseif pageNum == 4 then
+    if n == 2 then
+      if z == 1 then
+        viewinfo = 1 - viewinfo
+      end
+    elseif n == 3 then
+      if z == 1 then
+        freeze = 1 - freeze
+        if freeze == 1 then
+          set_feedback(1)
+        else
+          local fb = params:get("delay_feedback")
+          set_feedback(fb)
+        end
       end
     end
   end
@@ -920,6 +1112,93 @@ function redraw()
     screen.move(74, 56)
     screen.text("transpose")
   elseif pageNum == 3 then
+    local output = track[focus].track_out
+    screen.level(6)
+    screen.move(28, 8)
+    screen.font_size(8)
+    screen.text(focus)
+    if shift then
+      screen.level(sel and 15 or 4)
+      screen.move(14, 24)
+      if ((output == 3 or output == 4) or output == 6) then
+        screen.text(params:string(params_e[output]))
+      else
+        local params = output == 2 and string.sub(params:string(params_e[output]..focus), 1, 9) or params:string(params_e[output]..focus)
+        screen.text(params)
+      end
+      screen.move(74, 24)
+      if ((output == 3 or output == 4) or output == 6) then
+        screen.text(params:string(params_f[output]))
+      else
+        screen.text(params:string(params_f[output]..focus))
+      end
+      screen.level(3)
+      screen.move(14, 32)
+      screen.text(display_e[track[focus].track_out])
+      screen.move(74, 32)
+      screen.text(display_f[track[focus].track_out])
+      screen.level(not sel and 15 or 4)
+      screen.move(14, 48)
+      if ((output == 3 or output == 4) or output == 6) then
+        screen.text(params:string(params_g[output]))
+      else
+        screen.text(params:string(params_g[output]..focus))
+      end
+      screen.move(74, 48)
+      if params_h[output] == "" then
+        --return
+      elseif ((output == 3 or output == 4) or output == 6) then
+        screen.text(params:string(params_h[output]))
+      else
+        screen.text(params:string(params_h[output]..focus))
+      end
+      screen.level(3)
+      screen.move(14, 56)
+      screen.text(display_g[track[focus].track_out])
+      screen.move(74, 56)
+      screen.text(display_h[track[focus].track_out])
+    else
+      screen.level(sel and 15 or 4)
+      screen.move(14, 24)
+      if ((output == 3 or output == 4) or output == 6) then
+        screen.text(params:string(params_a[output]))
+      else
+        local params = output == 2 and string.sub(params:string(params_a[output]..focus), 1, 9) or params:string(params_a[output]..focus)
+        screen.text(params)
+      end
+      screen.move(74, 24)
+      if ((output == 3 or output == 4) or output == 6) then
+        screen.text(params:string(params_b[output]))
+      else
+        screen.text(params:string(params_b[output]..focus))
+      end
+      screen.level(3)
+      screen.move(14, 32)
+      screen.text(display_a[track[focus].track_out])
+      screen.move(74, 32)
+      screen.text(display_b[track[focus].track_out])
+      screen.level(not sel and 15 or 4)
+      screen.move(14, 48)
+      if ((output == 3 or output == 4) or output == 6) then
+        screen.text(params:string(params_c[output]))
+      else
+        screen.text(params:string(params_c[output]..focus))
+      end
+      screen.move(74, 48)
+      if params_d[output] == "" then
+        --return
+      elseif ((output == 3 or output == 4) or output == 6) then
+        screen.text(params:string(params_d[output]))
+      else
+        screen.text(params:string(params_d[output]..focus))
+      end
+      screen.level(3)
+      screen.move(14, 56)
+      screen.text(display_c[track[focus].track_out])
+      screen.move(74, 56)
+      screen.text(display_d[track[focus].track_out])
+    end
+  elseif pageNum == 4 then
     screen.level(sel and 15 or 4)
     screen.move(14, 24)
     screen.text(params:string("delay_level"))
@@ -932,10 +1211,10 @@ function redraw()
     screen.text("rate")
     screen.level(not sel and 15 or 4)
     screen.move(14, 48)
-    if params:get("delay_feedback") < 1 then
-      screen.text(params:string("delay_feedback"))
-    else
+    if (params:get("delay_feedback") == 1 or freeze == 1) then
       screen.text("freeeeze")
+    else
+      screen.text(params:string("delay_feedback"))
     end
     screen.move(74, 48)
     screen.text(params:string("delay_length_ft"))
@@ -944,33 +1223,12 @@ function redraw()
     screen.text("feedback")
     screen.move(74, 56)
     screen.text("adjust rate")
-  elseif pageNum == 4 then
-    screen.level(sel and 15 or 4)
-    screen.move(14, 24)
-    screen.text(params:string("bangs_cutoff"))
-    screen.move(74, 24)
-    screen.text(params:string("bangs_pw"))
-    screen.level(3)
-    screen.move(14, 32)
-    screen.text("cutoff")
-    screen.move(74, 32)
-    screen.text("pw")
-    screen.level(not sel and 15 or 4)
-    screen.move(14, 48)
-    screen.text(params:string("bangs_attack"))
-    screen.move(74, 48)
-    screen.text(params:string("bangs_release"))
-    screen.level(3)
-    screen.move(14, 56)
-    screen.text("attack")
-    screen.move(74, 56)
-    screen.text("release")
   end
   screen.update()
 end
 
--------- grid interface --------
 
+-------- grid interface --------
 function g.key(x, y, z)
   -- loop modifier keys
   if x == 15 then
@@ -1003,7 +1261,7 @@ function g.key(x, y, z)
     alt = z == 1 and true or false
   end
   -- set loop size
-  if y < 5 then
+  if y < 5 and params:get("loop_set_keys") == 2 then
     local i = y
     if z == 1 and held[i] then heldmax[i] = 0 end
     held[i] = held[i] + (z * 2 - 1)
@@ -1020,7 +1278,8 @@ function g.key(x, y, z)
         params:set("loop_end"..i, math.max(first[y], second[y]))
       end
     end
-    t_refresh()
+    page_redraw(1)
+    dirtygrid = true
   end
   -- all other functions
   if z == 1 then
@@ -1044,6 +1303,9 @@ function g.key(x, y, z)
         elseif mod then
           for i = 1, 4 do
             track[i].pos = x
+            if not track[i].running then
+              play_voice(i)
+            end
           end
         else
           track[i].pos = x
@@ -1072,8 +1334,7 @@ function g.key(x, y, z)
       local i = y - 4
       -- run/stop
       if x == 1 and not alt then
-        track[i].running = not track[i].running
-        if not track[i].running then notes_off(i) end
+        transport_track(i)
       elseif x == 1 and alt then
         if track[i].running then
           if params:get("midi_trnsp") == 2 then m[0]:stop() transport_tog = 0 end
@@ -1215,7 +1476,7 @@ function gridredraw()
   g:led(16, 6, set_oct and 15 or 4)
   g:led(16, 7, set_trsp and 15 or 4)
   g:led(16, 8, alt and 15 or 8)
-  -- functions
+  -- playback
   for i = 1, 4 do
     g:led(1, i + 4, track[i].running and 15 or 4) -- run/stop
     g:led(2, i + 4, focus == i and 8 or 3) -- focus
@@ -1247,19 +1508,42 @@ function gridredraw()
   g:refresh()
 end
 
--------- menu and redraw functions --------
 
+-------- menu and redraw functions --------
 function build_menu()
   for i = 1, 4 do
+    if track[i].track_out == 1 then
+      params:show("moon_synthesis"..i)
+      params:show("moon_amp"..i)
+      params:show("moon_sub_div"..i)
+      params:show("moon_noise_amp"..i)
+      params:show("moon_cutoff"..i)
+      params:show("moon_cutoff_env"..i)
+      params:show("moon_resonance"..i)
+      params:show("moon_attack"..i)
+      params:show("moon_release"..i)
+      params:show("moon_pan"..i)
+    else
+      params:hide("moon_synthesis"..i)
+      params:hide("moon_amp"..i)
+      params:hide("moon_sub_div"..i)
+      params:hide("moon_noise_amp"..i)
+      params:hide("moon_cutoff"..i)
+      params:hide("moon_cutoff_env"..i)
+      params:hide("moon_resonance"..i)
+      params:hide("moon_attack"..i)
+      params:hide("moon_release"..i)
+      params:hide("moon_pan"..i)
+    end
     if track[i].track_out == 2 then
-      params:show("global_midi_channel")
+      params:show("midi_params_"..i)
       params:show("track_midi_device"..i)
       params:show("track_midi_channel"..i)
       params:show("vel_mode"..i)
       params:show("midi_vel_val"..i)
       params:show("midi_vel_range"..i)
     else
-      params:hide("global_midi_channel")
+      params:hide("midi_params_"..i)
       params:hide("track_midi_device"..i)
       params:hide("track_midi_channel"..i)
       params:hide("vel_mode"..i)
@@ -1277,6 +1561,7 @@ function build_menu()
       end
     end
     if track[i].track_out == 5 then
+      params:show("jf_params_"..i)
       if params:get("jf_mode"..i) == 1 then
         params:show("jf_voice"..i)
       else
@@ -1285,52 +1570,32 @@ function build_menu()
       params:show("jf_amp"..i)
       params:show("jf_mode"..i)
     else
+      params:hide("jf_params_"..i)
       params:hide("jf_mode"..i)
       params:hide("jf_voice"..i)
       params:hide("jf_amp"..i)
     end
   end
   _menu.rebuild_params()
-  dirtyscreen = true
 end
 
-function t_refresh()
-  if pageNum == 1 then
-    dirtyscreen = true
-  end
-  dirtygrid = true
-end
-
-function p_refresh()
-  if pageNum == 2 then
-    dirtyscreen = true
-  end
-  dirtygrid = true
-end
-
-function d_refresh()
-  if pageNum == 3 then
-    dirtyscreen = true
-  end
-end
-
-function s_refresh()
-  if pageNum == 4 then
-    dirtyscreen = true
-  end
-end
-
-function grid_update()
+function grid_redraw()
   if dirtygrid == true then
     gridredraw()
     dirtygrid = false
   end
 end
 
-function screen_update()
+function screen_redraw()
   if dirtyscreen == true then
     redraw()
     dirtyscreen = false
+  end
+end
+
+function page_redraw(num)
+  if pageNum == num then
+    dirtyscreen = true
   end
 end
 
@@ -1341,5 +1606,7 @@ end
 
 function cleanup()
   grid.add = function() end
+  midi.add = function() end
+  midi.remove = function() end
   crow.ii.jf.mode(0)
 end
