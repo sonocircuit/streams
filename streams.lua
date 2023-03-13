@@ -3,12 +3,12 @@
 -- ~~a multi playhead sequencer
 --
 -- 1.1.0 @sonocircuit
--- llllllll.co/t/?????
+-- llllllll.co/t/streams/61436
 --
 --
 -- for docs go to:
 -- >> github.com
---    /sonocircuits/streams
+--    /sonocircuit/streams
 --
 -- or smb into:
 -- >> code/streams/docs
