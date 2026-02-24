@@ -2,7 +2,7 @@
 --
 -- ~~a multi playhead sequencer
 --
--- 1.1.0 @sonocircuit
+-- 1.1.1 @sonoCircuit
 -- llllllll.co/t/streams/61436
 --
 --
@@ -33,6 +33,7 @@ local g = grid.connect()
 
 -------- variables --------
 local pset_load = false
+local mirror_midi = false
 local default_pset = 6
 
 local pageNum = 1
@@ -268,7 +269,7 @@ function clock.transport.start()
   if params:get("midi_trnsp") == 3 then
     for i = 1, 4 do
       if params:get("midi_trnsp_enable"..i) == 2 then
-        track[i].running = true
+        params:set("track_transport"..i, 2)
       end
     end
     transport = 1
@@ -278,7 +279,7 @@ end
 function clock.transport.stop()
   if params:get("midi_trnsp") == 3 then
     for i = 1, 4 do
-      track[i].running = false
+      params:set("track_transport"..i, 1)
       reset_pos()
       notes_off(i)
     end
@@ -433,8 +434,8 @@ function init()
     params:add_option("track_out"..i, "output", options.ind_out, 1)
     params:set_action("track_out"..i, function() set_track_output() build_menu() end)
 
-    params:add_binary("track_transport"..i, "run/stop", "trigger")
-    params:set_action("track_transport"..i, function() transport_track(i) end)
+    params:add_option("track_transport"..i, "transport", {"stop", "run"}, 1)
+    params:set_action("track_transport"..i, function(x) transport_track(i, x)  end)
 
     -- moonshine params
     params:add_separator("moon_synthesis"..i, "moonshine settings")
@@ -472,13 +473,13 @@ function init()
     params:add_option("track_midi_device"..i, "midi device", midi_devices, 1)
     params:set_action("track_midi_device"..i, function(val) m[i] = midi.connect(val) page_redraw(3) end)
 
-    params:add_number("track_midi_channel"..i, "midi channel", 1, 16, 1)
+    params:add_number("track_midi_channel"..i, "midi channel", 1, 16, i)
     params:set_action("track_midi_channel"..i, function(val) notes_off(i) set_midi[i].ch = val page_redraw(3) end)
 
     params:add_option("vel_mode"..i, "velocity mode", {"fixed", "random"}, 1)
     params:set_action("vel_mode"..i, function() set_velocity(i) end)
 
-    params:add_number("midi_vel_val"..i, "velocity value", 1, 127, 100)
+    params:add_number("midi_vel_val"..i, "velocity value", 0, 127, 100)
     params:set_action("midi_vel_val"..i, function(val) set_midi[i].vel = val set_velocity(i) end)
 
     params:add_number("midi_vel_range"..i, "velocity range ±", 1, 127, 20)
@@ -778,7 +779,7 @@ function play_voice(i)
   if track[i].track_out == 1 then
     engine.trig(i, freq)
   -- midi output
-  elseif track[i].track_out == 2 then
+  elseif (track[i].track_out == 2 or mirror_midi) then
     if params:get("vel_mode"..i) == 2 then
       set_midi[i].velocity = math.random(set_midi[i].vel_lo, set_midi[i].vel_hi)
     else
@@ -811,19 +812,19 @@ end
 function transport_all()
   if transport == 1 then
     for i = 1, 4 do
-      track[i].running = true
+      params:set("track_transport"..i, 2)
     end
   else
     if params:get("midi_trnsp") == 2 then m[0]:stop() transport_tog = 0 end
     for i = 1, 4 do
-      track[i].running = false
+      params:set("track_transport"..i, 1)
       notes_off(i)
     end
   end
 end
 
-function transport_track(i)
-  track[i].running = not track[i].running
+function transport_track(i, state)
+  track[i].running = state == 2 and true or false
   if not track[i].running then
     notes_off(i)
   end
@@ -837,6 +838,7 @@ function transport_track(i)
     transport = 1
   else
     transport = 0
+    if params:get("midi_trnsp") == 2 then m[0]:stop() transport_tog = 0 end
   end
   dirtygrid = true
 end
@@ -1334,18 +1336,18 @@ function g.key(x, y, z)
       local i = y - 4
       -- run/stop
       if x == 1 and not alt then
-        transport_track(i)
+        params:set("track_transport"..i, track[i].running and 1 or 2)
       elseif x == 1 and alt then
         if track[i].running then
           if params:get("midi_trnsp") == 2 then m[0]:stop() transport_tog = 0 end
           for j = 1, 4 do
-            track[j].running = false
+            params:set("track_transport"..j, 1)
             notes_off(j)
             reset_pos()
           end
         elseif not track[i].running then
           for j = 1, 4 do
-            track[j].running = true
+            params:set("track_transport"..j, 2)
           end
         end
         dirtyscreen = true
